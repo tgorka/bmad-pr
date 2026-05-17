@@ -1,0 +1,63 @@
+.github/workflows/release.yml
+  s_3c9ce881de35cf::t_f66c5a23c04c6f 1-44
+.github/ISSUE_TEMPLATE/bug.md
+  s_3c9ce881de35cf::t_0791fb70b05716 1-36
+.github/dependabot.yml
+  s_3c9ce881de35cf::t_345f44b3532ca5 1-25
+CODE_OF_CONDUCT.md
+  s_3c9ce881de35cf::t_c1bfd2fd61cd7b 1-25
+CONTRIBUTING.md
+  s_3c9ce881de35cf::t_178c879743617d 1-57
+.github/PULL_REQUEST_TEMPLATE.md
+  s_3c9ce881de35cf::t_f4fae1fb9ea2f7 1-21
+package.json
+  s_3c9ce881de35cf::t_312b5a96d2514e 1-10,13-15,17-22
+  s_3c9ce881de35cf::t_b6cf8f93259944 11-12,16
+.changeset/README.md
+  s_3c9ce881de35cf::t_7b154ca0d128e7 1-5
+bunfig.toml
+  s_3c9ce881de35cf::t_7006584386460c 1-2
+.github/workflows/ci.yml
+  s_3c9ce881de35cf::t_32c4d62b8b65c1 1-24
+CHANGELOG.md
+  s_3c9ce881de35cf::t_a1d1fc02db0d24 1-5
+SECURITY.md
+  s_3c9ce881de35cf::t_8e501f1f8e11dc 1-26
+.github/ISSUE_TEMPLATE/feature.md
+  s_3c9ce881de35cf::t_aeaf8a2b8a79b7 1-22
+README.md
+  s_3c9ce881de35cf::t_b9f75f7db9b58a 1-42
+tsconfig.json
+  s_3c9ce881de35cf::t_bb3f7760e81d5c 1-19
+AGENTS.md
+  s_3c9ce881de35cf::t_58691d6278b0c1 1-50
+biome.json
+  s_3c9ce881de35cf::t_f2506ef39d16a1 2-5,12-13
+  s_3c9ce881de35cf::t_47286168d07767 6-11
+  s_3c9ce881de35cf::t_3e62319bfc68f4 1,14-39
+.changeset/config.json
+  s_3c9ce881de35cf::t_a3a4dd27dc88ac 1-11
+.gitignore
+  s_3c9ce881de35cf::t_ce45c9431df026 1-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "3060a9f08eb04121f9a92e0031057991ec426911",
+  "prompts": {},
+  "humans": {
+    "h_a5ef7a074c9097": {
+      "author": "tomasz-gorka-endeavor <tomasz@endeavorai.com>"
+    }
+  },
+  "sessions": {
+    "s_3c9ce881de35cf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fe148d12-e336-4bf9-995d-88f524485849",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "tomasz-gorka-endeavor <tomasz@endeavorai.com>"
+    }
+  }
+}
