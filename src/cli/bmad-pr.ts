@@ -106,16 +106,19 @@ async function execute(args: ParsedArgs, ctx: ExecCtx): Promise<number> {
     throw new BmadPrError("refuse", "--phase is required");
   }
   const id = parseStoryId(args.story);
-  const storyPath = resolveStoryPath(ctx.cwd, id);
 
-  if (!(await detectGhOnPath(ctx.runner))) {
+  const repoRoot = await resolveRepoRoot(ctx.runner, ctx.cwd);
+  const driverOpts = { cwd: repoRoot };
+  const storyPath = resolveStoryPath(repoRoot, id);
+
+  if (!(await detectGhOnPath(ctx.runner, driverOpts))) {
     throw new BmadPrError(
       "refuse",
       "'gh' CLI not on PATH. See: https://cli.github.com/",
     );
   }
 
-  const branch = await detectBranch(ctx.runner);
+  const branch = await detectBranch(ctx.runner, repoRoot);
   if (branch === args.trunkBranch) {
     throw new BmadPrError(
       "refuse",
@@ -141,8 +144,8 @@ async function execute(args: ParsedArgs, ctx: ExecCtx): Promise<number> {
     const prNumber = parsePrNumberFromUrl(existing.url);
     if (prNumber === null) {
       throw new BmadPrError(
-        "fail",
-        `ledger entry has unparseable URL: ${existing.url}`,
+        "refuse",
+        `malformed ledger at ${storyPath}: PR URL is unparseable: ${existing.url}`,
       );
     }
     if (args.dryRun) {
@@ -154,8 +157,8 @@ async function execute(args: ParsedArgs, ctx: ExecCtx): Promise<number> {
       return 0;
     }
     const amendBody = buildBody(id, args.phase, existing.runId);
-    await pushBranch(ctx.runner);
-    await editPrBody(ctx.runner, { prNumber, body: amendBody });
+    await pushBranch(ctx.runner, driverOpts);
+    await editPrBody(ctx.runner, { prNumber, body: amendBody }, driverOpts);
     await updateEntry(
       storyPath,
       (e) => e.phase === args.phase && e.status === "open",
@@ -183,16 +186,34 @@ async function execute(args: ParsedArgs, ctx: ExecCtx): Promise<number> {
     return 0;
   }
 
-  await pushBranch(ctx.runner);
-  const url = await createDraftPr(ctx.runner, { title, body });
+  await pushBranch(ctx.runner, driverOpts);
+  const url = await createDraftPr(ctx.runner, { title, body }, driverOpts);
   entry.url = url;
   await appendEntry(storyPath, id, entry);
   ctx.stdout(`${url}\n`);
   return 0;
 }
 
-async function detectBranch(runner: Runner): Promise<string> {
-  const r = await runner("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+async function resolveRepoRoot(runner: Runner, cwd: string): Promise<string> {
+  const r = await runner("git", ["rev-parse", "--show-toplevel"], { cwd });
+  if (r.exitCode !== 0) {
+    throw new BmadPrError(
+      "refuse",
+      `not inside a git repository (cwd=${cwd}). Run: git init or cd into a repo first.`,
+    );
+  }
+  const root = r.stdout.trim();
+  if (root === "") {
+    throw new BmadPrError(
+      "fail",
+      `git rev-parse --show-toplevel returned empty stdout (cwd=${cwd})`,
+    );
+  }
+  return root;
+}
+
+async function detectBranch(runner: Runner, cwd: string): Promise<string> {
+  const r = await runner("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd });
   if (r.exitCode !== 0) {
     throw new BmadPrError("fail", `git rev-parse failed: ${r.stderr.trim()}`);
   }

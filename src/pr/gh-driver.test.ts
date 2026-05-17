@@ -93,16 +93,16 @@ describe("createDraftPr", () => {
 
   test("throws BmadPrError('fail') when gh exits non-zero", async () => {
     const { runner } = stubRunner([{ exitCode: 1, stderr: "boom" }]);
-    expect(
+    await expect(
       createDraftPr(runner, { title: "t", body: "b" }),
     ).rejects.toBeInstanceOf(BmadPrError);
   });
 
   test("throws BmadPrError('fail') when stdout has no URL", async () => {
     const { runner } = stubRunner([{ exitCode: 0, stdout: "weird output\n" }]);
-    expect(createDraftPr(runner, { title: "t", body: "b" })).rejects.toThrow(
-      /could not parse PR URL/,
-    );
+    await expect(
+      createDraftPr(runner, { title: "t", body: "b" }),
+    ).rejects.toThrow(/could not parse PR URL/);
   });
 });
 
@@ -116,9 +116,48 @@ describe("editPrBody", () => {
 
   test("throws on non-zero exit", async () => {
     const { runner } = stubRunner([{ exitCode: 1, stderr: "nope" }]);
-    expect(
+    await expect(
       editPrBody(runner, { prNumber: 7, body: "b" }),
     ).rejects.toBeInstanceOf(BmadPrError);
+  });
+});
+
+describe("driver opts.cwd forwarding", () => {
+  test("detectGhOnPath, pushBranch, createDraftPr, and editPrBody pass cwd to the runner", async () => {
+    const calls: Array<{ cmd: string; opts: { cwd?: string } | undefined }> =
+      [];
+    let i = 0;
+    const responses: ReadonlyArray<Partial<RunnerResult>> = [
+      { exitCode: 0, stdout: "gh version 2.40.0\n" },
+      { exitCode: 0 },
+      { exitCode: 0, stdout: "https://github.com/o/r/pull/7\n" },
+      { exitCode: 0 },
+    ];
+    const runner: Runner = async (cmd, _args, opts) => {
+      calls.push({ cmd, opts });
+      const r = responses[i++] ?? {};
+      return {
+        stdout: r.stdout ?? "",
+        stderr: r.stderr ?? "",
+        exitCode: r.exitCode ?? 0,
+      };
+    };
+    await detectGhOnPath(runner, { cwd: "/tmp/repo-a" });
+    await pushBranch(runner, { cwd: "/tmp/repo-a" });
+    await createDraftPr(
+      runner,
+      { title: "t", body: "b" },
+      { cwd: "/tmp/repo-a" },
+    );
+    await editPrBody(
+      runner,
+      { prNumber: 7, body: "b" },
+      { cwd: "/tmp/repo-a" },
+    );
+    expect(calls).toHaveLength(4);
+    for (const c of calls) {
+      expect(c.opts?.cwd).toBe("/tmp/repo-a");
+    }
   });
 });
 

@@ -110,7 +110,7 @@ prs:
 ---
 `,
     );
-    expect(loadLedger(path)).rejects.toThrow(/missing 'url'/);
+    await expect(loadLedger(path)).rejects.toThrow(/missing 'url'/);
   });
 });
 
@@ -265,7 +265,7 @@ prs:
   test("refuses when no entry matches", async () => {
     const path = join(tmp, "3.2.md");
     writeFileSync(path, "---\nprs: []\n---\n");
-    expect(
+    await expect(
       updateEntry(
         path,
         () => true,

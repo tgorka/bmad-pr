@@ -18,4 +18,11 @@ describe("runCommand", () => {
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr.length).toBeGreaterThan(0);
   });
+
+  test("maps ENOENT spawn failure to exit code 127 (absolute non-existent path)", async () => {
+    // Use an absolute path so PATH lookup is irrelevant — always ENOENT.
+    const result = await runCommand("/var/empty/no-such-binary", []);
+    expect(result.exitCode).toBe(127);
+    expect(result.stderr.length).toBeGreaterThan(0);
+  });
 });

@@ -30,8 +30,12 @@ export type RunnerResult = {
   exitCode: number;
 };
 
+export type RunnerOpts = { cwd?: string };
+
 export type Runner = (
   cmd: string,
   args: readonly string[],
-  opts?: { cwd?: string },
+  opts?: RunnerOpts,
 ) => Promise<RunnerResult>;
+
+export type DriverOpts = { cwd?: string };

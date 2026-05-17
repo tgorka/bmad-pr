@@ -5,7 +5,11 @@ import { join } from "node:path";
 import type { Runner, RunnerResult } from "../pr/types.ts";
 import { run } from "./bmad-pr.ts";
 
-type Call = { cmd: string; args: readonly string[] };
+type Call = {
+  cmd: string;
+  args: readonly string[];
+  cwd: string | undefined;
+};
 
 let tmp: string;
 
@@ -22,8 +26,8 @@ function harness(
 ): { runner: Runner; calls: Call[]; chunks: string[] } {
   const calls: Call[] = [];
   const cursor: Record<string, number> = {};
-  const runner: Runner = async (cmd, args) => {
-    calls.push({ cmd, args });
+  const runner: Runner = async (cmd, args, opts) => {
+    calls.push({ cmd, args, cwd: opts?.cwd });
     const key = matchKey(cmd, args, responses);
     const list = responses[key] ?? [];
     const i = cursor[key] ?? 0;
@@ -52,12 +56,12 @@ function matchKey(
   return cmd;
 }
 
-const happyResponses = (): Record<
-  string,
-  ReadonlyArray<Partial<RunnerResult>>
-> => ({
+const happyResponses = (
+  toplevel: string,
+): Record<string, ReadonlyArray<Partial<RunnerResult>>> => ({
   "gh --version": [{ exitCode: 0, stdout: "gh version 2.40.0\n" }],
-  "git rev-parse": [{ exitCode: 0, stdout: "feat/x\n" }],
+  "git rev-parse --show-toplevel": [{ exitCode: 0, stdout: `${toplevel}\n` }],
+  "git rev-parse --abbrev-ref": [{ exitCode: 0, stdout: "feat/x\n" }],
   "git push": [{ exitCode: 0 }],
   "gh pr create": [{ exitCode: 0, stdout: "https://github.com/o/r/pull/42\n" }],
   "gh pr edit": [{ exitCode: 0 }],
@@ -83,7 +87,7 @@ describe("run --help", () => {
 
 describe("run open path", () => {
   test("opens a new PR and writes a ledger entry", async () => {
-    const { runner, calls } = harness(happyResponses());
+    const { runner, calls } = harness(happyResponses(tmp));
     const stdout: string[] = [];
     const stderr: string[] = [];
     const code = await run(
@@ -114,13 +118,23 @@ describe("run open path", () => {
     expect(written).toContain("runId: R1");
     expect(written).toContain("openedAt: 2026-05-17T14:22:03Z");
     expect(written).toContain("lastAmendedAt: 2026-05-17T14:22:03Z");
+    // Every driver-routed git/gh call should have run inside the repo root.
+    const driverCalls = calls.filter(
+      (c) =>
+        (c.cmd === "gh" && c.args[0] !== "--version") ||
+        (c.cmd === "git" && c.args[0] === "push") ||
+        (c.cmd === "git" && c.args[0] === "rev-parse"),
+    );
+    for (const c of driverCalls) {
+      expect(c.cwd).toBe(tmp);
+    }
   });
 });
 
 describe("run auto-amend path", () => {
   test("amends existing open entry on the second invocation", async () => {
-    const responses1 = happyResponses();
-    const responses2 = happyResponses();
+    const responses1 = happyResponses(tmp);
+    const responses2 = happyResponses(tmp);
     const h1 = harness(responses1);
     const code1 = await run(["--story", "3.2", "--phase", "dev-story"], {
       runner: h1.runner,
@@ -157,7 +171,7 @@ describe("run auto-amend path", () => {
   });
 
   test("preserves original runId on amend (ignores new --run-id)", async () => {
-    const responses1 = happyResponses();
+    const responses1 = happyResponses(tmp);
     const h1 = harness(responses1);
     await run(
       ["--story", "3.2", "--phase", "dev-story", "--run-id", "R-ORIGINAL"],
@@ -169,7 +183,7 @@ describe("run auto-amend path", () => {
         now: () => new Date("2026-05-17T14:00:00Z"),
       },
     );
-    const responses2 = happyResponses();
+    const responses2 = happyResponses(tmp);
     const h2 = harness(responses2);
     await run(["--story", "3.2", "--phase", "dev-story", "--run-id", "R-NEW"], {
       runner: h2.runner,
@@ -199,7 +213,7 @@ describe("run --amend with no match", () => {
     const code = await run(
       ["--story", "3.2", "--phase", "dev-story", "--amend"],
       {
-        runner: harness(happyResponses()).runner,
+        runner: harness(happyResponses(tmp)).runner,
         cwd: tmp,
         stdoutSink: () => {},
         stderrSink: (s) => stderr.push(s),
@@ -213,8 +227,10 @@ describe("run --amend with no match", () => {
 
 describe("run refusals", () => {
   test("on trunk branch", async () => {
-    const responses = happyResponses();
-    responses["git rev-parse"] = [{ exitCode: 0, stdout: "main\n" }];
+    const responses = happyResponses(tmp);
+    responses["git rev-parse --abbrev-ref"] = [
+      { exitCode: 0, stdout: "main\n" },
+    ];
     const stderr: string[] = [];
     const code = await run(["--story", "3.2", "--phase", "dev-story"], {
       runner: harness(responses).runner,
@@ -228,7 +244,7 @@ describe("run refusals", () => {
   });
 
   test("missing gh", async () => {
-    const responses = happyResponses();
+    const responses = happyResponses(tmp);
     responses["gh --version"] = [
       { exitCode: 127, stderr: "command not found" },
     ];
@@ -245,8 +261,10 @@ describe("run refusals", () => {
   });
 
   test("--trunk-branch override refuses on the named branch", async () => {
-    const responses = happyResponses();
-    responses["git rev-parse"] = [{ exitCode: 0, stdout: "develop\n" }];
+    const responses = happyResponses(tmp);
+    responses["git rev-parse --abbrev-ref"] = [
+      { exitCode: 0, stdout: "develop\n" },
+    ];
     const stderr: string[] = [];
     const code = await run(
       ["--story", "3.2", "--phase", "dev-story", "--trunk-branch", "develop"],
@@ -265,7 +283,7 @@ describe("run refusals", () => {
   test("flag value starting with -- is rejected", async () => {
     const stderr: string[] = [];
     const code = await run(["--story", "--phase", "dev-story"], {
-      runner: harness(happyResponses()).runner,
+      runner: harness(happyResponses(tmp)).runner,
       cwd: tmp,
       stdoutSink: () => {},
       stderrSink: (s) => stderr.push(s),
@@ -278,7 +296,7 @@ describe("run refusals", () => {
   test("malformed --story", async () => {
     const stderr: string[] = [];
     const code = await run(["--story", "foo", "--phase", "dev-story"], {
-      runner: harness(happyResponses()).runner,
+      runner: harness(happyResponses(tmp)).runner,
       cwd: tmp,
       stdoutSink: () => {},
       stderrSink: (s) => stderr.push(s),
@@ -286,6 +304,64 @@ describe("run refusals", () => {
     });
     expect(code).toBe(2);
     expect(stderrOf(stderr)).toContain("<epic>.<story>");
+  });
+
+  test("not inside a git repository", async () => {
+    const responses = happyResponses(tmp);
+    responses["git rev-parse --show-toplevel"] = [
+      { exitCode: 128, stderr: "not a git repository" },
+    ];
+    const stderr: string[] = [];
+    const code = await run(["--story", "3.2", "--phase", "dev-story"], {
+      runner: harness(responses).runner,
+      cwd: tmp,
+      stdoutSink: () => {},
+      stderrSink: (s) => stderr.push(s),
+      now: () => new Date(),
+    });
+    expect(code).toBe(2);
+    expect(stderrOf(stderr)).toContain("not inside a git repository");
+  });
+
+  test("unparseable stored PR URL refuses (exit 2, not exit 1)", async () => {
+    const fs = await import("node:fs");
+    fs.mkdirSync(join(tmp, "_bmad-output/stories"), { recursive: true });
+    writeFileSync(
+      join(tmp, "_bmad-output/stories/3.2.md"),
+      "---\nepic: 3\nstory: 2\nprs:\n  - url: not-a-valid-url\n    phase: dev-story\n    status: open\n    openedAt: 2026-05-17T10:00:00Z\n    lastAmendedAt: 2026-05-17T10:00:00Z\n---\n",
+    );
+    const stderr: string[] = [];
+    const code = await run(["--story", "3.2", "--phase", "dev-story"], {
+      runner: harness(happyResponses(tmp)).runner,
+      cwd: tmp,
+      stdoutSink: () => {},
+      stderrSink: (s) => stderr.push(s),
+      now: () => new Date(),
+    });
+    expect(code).toBe(2);
+    expect(stderrOf(stderr)).toContain("unparseable");
+  });
+
+  test("unparseable stored PR URL refuses under --dry-run too", async () => {
+    const fs = await import("node:fs");
+    fs.mkdirSync(join(tmp, "_bmad-output/stories"), { recursive: true });
+    writeFileSync(
+      join(tmp, "_bmad-output/stories/3.2.md"),
+      "---\nepic: 3\nstory: 2\nprs:\n  - url: also-broken\n    phase: dev-story\n    status: open\n    openedAt: 2026-05-17T10:00:00Z\n    lastAmendedAt: 2026-05-17T10:00:00Z\n---\n",
+    );
+    const stderr: string[] = [];
+    const code = await run(
+      ["--story", "3.2", "--phase", "dev-story", "--dry-run"],
+      {
+        runner: harness(happyResponses(tmp)).runner,
+        cwd: tmp,
+        stdoutSink: () => {},
+        stderrSink: (s) => stderr.push(s),
+        now: () => new Date(),
+      },
+    );
+    expect(code).toBe(2);
+    expect(stderrOf(stderr)).toContain("unparseable");
   });
 
   test("malformed ledger entry", async () => {
@@ -298,7 +374,7 @@ describe("run refusals", () => {
     );
     const stderr: string[] = [];
     const code = await run(["--story", "3.2", "--phase", "dev-story"], {
-      runner: harness(happyResponses()).runner,
+      runner: harness(happyResponses(tmp)).runner,
       cwd: tmp,
       stdoutSink: () => {},
       stderrSink: (s) => stderr.push(s),
@@ -311,7 +387,7 @@ describe("run refusals", () => {
 
 describe("run --dry-run", () => {
   test("prints would-run plan, makes no side-effecting calls", async () => {
-    const { runner, calls } = harness(happyResponses());
+    const { runner, calls } = harness(happyResponses(tmp));
     const stdout: string[] = [];
     const stderr: string[] = [];
     const code = await run(
