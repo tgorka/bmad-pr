@@ -32,11 +32,14 @@ Every change must satisfy:
 - Async = `async/await`. Prefer Bun-native APIs (`Bun.file`, `Bun.write`, `Bun.YAML.parse`, `Bun.spawn`).
 - Biome 2.4 only — no ESLint/Prettier.
 
-## State + scope discipline
+## Runtime scope discipline
 
-- Never write outside `_bmad-output/` and standard build dirs (`dist/`, `coverage/`, `node_modules/`).
+These rules cover what *running code and dispatched agents may write to on disk during execution* — they do not restrict normal source edits to files in this repo. Editing `src/`, configs, docs, and `_bmad-output/` artifacts is expected; follow `CONTRIBUTING.md`.
+
+- Runtime writes stay inside the project root (this repo's working tree). Don't touch paths outside it unless the user explicitly asks.
+- Inside the repo, runtime/generated state belongs under `_bmad-output/` (and standard build dirs like `dist/`, `coverage/`, `node_modules/`). Avoid scattering generated files elsewhere.
 - Never write to BMAD-installed files under `~/.claude/plugins/cache/bmad-method/` — read-only inputs.
-- Atomic state writes (tmp + rename) when modifying anything under `_bmad-output/.stepper/`.
+- Atomic writes (tmp + rename) when modifying anything under `_bmad-output/.stepper/`.
 
 ## Test patterns
 
