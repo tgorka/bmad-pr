@@ -1,0 +1,22 @@
+{
+  "name": "bmad-pr",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "bun test --pass-with-no-tests",
+    "test:watch": "bun test --watch --pass-with-no-tests",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "check": "biome ci . && bun test --pass-with-no-tests",
+    "changeset": "changeset"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.15",
+    "@changesets/cli": "^2.31.0",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
