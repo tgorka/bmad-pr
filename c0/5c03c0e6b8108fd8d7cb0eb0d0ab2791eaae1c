@@ -1,0 +1,21 @@
+AGENTS.md
+  s_3c9ce881de35cf::t_f00af0f70db03a 35,37-40,42
+.github/workflows/release.yml
+  s_3c9ce881de35cf::t_8462c5b54ac005 28-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "c05c03c0e6b8108fd8d7cb0eb0d0ab2791eaae1c",
+  "prompts": {},
+  "sessions": {
+    "s_3c9ce881de35cf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fe148d12-e336-4bf9-995d-88f524485849",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "tomasz-gorka-endeavor <tomasz@endeavorai.com>"
+    }
+  }
+}

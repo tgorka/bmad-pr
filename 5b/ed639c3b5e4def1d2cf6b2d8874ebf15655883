@@ -1,0 +1,19 @@
+cubic.yaml
+  s_3c9ce881de35cf::t_efe9240bb919e9 1-2,7,12-31,37-44,59-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "5bed639c3b5e4def1d2cf6b2d8874ebf15655883",
+  "prompts": {},
+  "sessions": {
+    "s_3c9ce881de35cf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fe148d12-e336-4bf9-995d-88f524485849",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "tomasz-gorka-endeavor <tomasz@endeavorai.com>"
+    }
+  }
+}
