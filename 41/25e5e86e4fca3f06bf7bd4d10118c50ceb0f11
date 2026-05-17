@@ -1,0 +1,27 @@
+src/cli/bmad-pr.ts
+  s_5b723f64ffa607::t_1d4c335f6d347d 200,203
+src/pr/runner.ts
+  s_5b723f64ffa607::t_95e95308db741e 1,16-32
+  s_5b723f64ffa607::t_42a51d1d32fd9f 48-53
+src/cli/bmad-pr.test.ts
+  s_5b723f64ffa607::t_9fe0b8fb8244b9 309,312-313,316-333,346
+  ai_agent 314-315,334-335
+src/pr/runner.test.ts
+  s_5b723f64ffa607::t_57e9a057f72161 28-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "4125e5e86e4fca3f06bf7bd4d10118c50ceb0f11",
+  "prompts": {},
+  "sessions": {
+    "s_5b723f64ffa607": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b39288db-3011-429f-8252-1f5e7c3eabbb",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Tomasz Gorka <tomasz@gorka.org.pl>"
+    }
+  }
+}
