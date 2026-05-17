@@ -58,9 +58,12 @@ reviews:
 
     Runtime scope discipline (applies to running code / dispatched agents,
     not to normal source edits):
-    - Runtime writes stay inside the project root
+    - Runtime writes stay inside the project root (this repo's working tree).
+    - Inside the repo, runtime/generated state belongs under `_bmad-output/`
+      and standard build dirs (`dist/`, `coverage/`, `node_modules/`) —
+      avoid scattering generated files elsewhere.
     - Never write to BMAD-installed files under
-      `~/.claude/plugins/cache/bmad-method/` (read-only inputs)
+      `~/.claude/plugins/cache/bmad-method/` (read-only inputs).
 
     BMAD artifacts (`_bmad-output/**`) are the source of truth for
     planning + implementation work. Changes there should reference the
