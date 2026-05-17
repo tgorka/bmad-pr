@@ -1,3 +1,4 @@
+import { existsSync, statSync } from "node:fs";
 import type { Runner, RunnerResult } from "./types.ts";
 
 function spawnPiped(
@@ -10,6 +11,25 @@ function spawnPiped(
     stdout: "pipe",
     stderr: "pipe",
   });
+}
+
+function badCwd(cwd: string | undefined): RunnerResult | null {
+  if (cwd === undefined) return null;
+  if (!existsSync(cwd)) {
+    return {
+      stdout: "",
+      stderr: `cwd does not exist: ${cwd}`,
+      exitCode: 1,
+    };
+  }
+  if (!statSync(cwd).isDirectory()) {
+    return {
+      stdout: "",
+      stderr: `cwd is not a directory: ${cwd}`,
+      exitCode: 1,
+    };
+  }
+  return null;
 }
 
 function isBinaryNotFound(err: unknown): boolean {
@@ -25,6 +45,12 @@ function isBinaryNotFound(err: unknown): boolean {
 }
 
 export const runCommand: Runner = async (cmd, args, opts) => {
+  // Pre-validate cwd so a missing/invalid cwd is not later misclassified as
+  // an ENOENT "binary not found" by `isBinaryNotFound`. (Bun.spawn surfaces
+  // the same ENOENT for both conditions; pre-checking removes the ambiguity.)
+  const cwdProblem = badCwd(opts?.cwd);
+  if (cwdProblem !== null) return cwdProblem;
+
   let proc: ReturnType<typeof spawnPiped>;
   try {
     proc = spawnPiped(cmd, args, opts?.cwd);

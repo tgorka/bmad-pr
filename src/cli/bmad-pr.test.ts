@@ -306,10 +306,14 @@ describe("run refusals", () => {
     expect(stderrOf(stderr)).toContain("<epic>.<story>");
   });
 
-  test("not inside a git repository", async () => {
+  test("git rev-parse failure surfaces the real stderr (not a generic message)", async () => {
     const responses = happyResponses(tmp);
     responses["git rev-parse --show-toplevel"] = [
-      { exitCode: 128, stderr: "not a git repository" },
+      {
+        exitCode: 128,
+        stderr:
+          "fatal: not a git repository (or any of the parent directories): .git\n",
+      },
     ];
     const stderr: string[] = [];
     const code = await run(["--story", "3.2", "--phase", "dev-story"], {
@@ -320,7 +324,26 @@ describe("run refusals", () => {
       now: () => new Date(),
     });
     expect(code).toBe(2);
-    expect(stderrOf(stderr)).toContain("not inside a git repository");
+    const combined = stderrOf(stderr);
+    expect(combined).toContain("git rev-parse --show-toplevel failed");
+    expect(combined).toContain("fatal: not a git repository");
+  });
+
+  test("git rev-parse failure with empty stderr falls back to exit-code detail", async () => {
+    const responses = happyResponses(tmp);
+    responses["git rev-parse --show-toplevel"] = [
+      { exitCode: 130, stderr: "" },
+    ];
+    const stderr: string[] = [];
+    const code = await run(["--story", "3.2", "--phase", "dev-story"], {
+      runner: harness(responses).runner,
+      cwd: tmp,
+      stdoutSink: () => {},
+      stderrSink: (s) => stderr.push(s),
+      now: () => new Date(),
+    });
+    expect(code).toBe(2);
+    expect(stderrOf(stderr)).toContain("exit 130");
   });
 
   test("unparseable stored PR URL refuses (exit 2, not exit 1)", async () => {

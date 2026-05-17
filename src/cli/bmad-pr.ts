@@ -197,9 +197,10 @@ async function execute(args: ParsedArgs, ctx: ExecCtx): Promise<number> {
 async function resolveRepoRoot(runner: Runner, cwd: string): Promise<string> {
   const r = await runner("git", ["rev-parse", "--show-toplevel"], { cwd });
   if (r.exitCode !== 0) {
+    const detail = r.stderr.trim() || `exit ${r.exitCode}`;
     throw new BmadPrError(
       "refuse",
-      `not inside a git repository (cwd=${cwd}). Run: git init or cd into a repo first.`,
+      `git rev-parse --show-toplevel failed (cwd=${cwd}): ${detail}`,
     );
   }
   const root = r.stdout.trim();
