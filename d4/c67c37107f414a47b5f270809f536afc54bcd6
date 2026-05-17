@@ -1,0 +1,51 @@
+src/cli/bmad-pr.ts
+  s_5b723f64ffa607::t_3d89f06ed4fb89 110-114,121,147-148,160-161,189-190,197-204,215-216
+  s_5b723f64ffa607::t_f4f13d70ab7008 205-212
+src/pr/gh-driver.test.ts
+  s_5b723f64ffa607::t_c23416e5e8e893 119
+  s_5b723f64ffa607::t_d65c1ee4c98e05 96,103-105
+  s_5b723f64ffa607::t_e9c42b388d118e 127-128,152-156
+  s_5b723f64ffa607::t_1ca4c1fddf5450 125-126,129-151,157-163
+src/pr/runner.test.ts
+  s_5b723f64ffa607::t_ac40cbf1203329 21,25-27
+  s_5b723f64ffa607::t_f46cbe6ca06b42 22-24
+_bmad-output/implementation-artifacts/spec-cubic-review-fixes-pr3.md
+  s_5b723f64ffa607::t_9471a0914eee47 1-86
+src/pr/gh-driver.ts
+  s_5b723f64ffa607::t_afabab3792837c 4-8,12-18,29,31-35,54,56-60
+  s_5b723f64ffa607::t_55c0cb850ce51b 1
+src/pr/types.ts
+  s_5b723f64ffa607::t_884e5c55e52849 33-34,38,40-41
+src/pr/runner.ts
+  s_5b723f64ffa607::t_8a632d5ff52caf 19-22
+  s_5b723f64ffa607::t_0e1d3fd0a06cb8 15-18,23-26,32-36,38-44
+  s_5b723f64ffa607::t_6accc69ff59d19 3-14,28,30
+src/pr/ledger.test.ts
+  s_5b723f64ffa607::t_eb788d7acf22b9 268
+  s_5b723f64ffa607::t_6b65fb577802a6 113
+src/cli/bmad-pr.test.ts
+  s_5b723f64ffa607::t_6cb6a859257964 8-12
+  s_5b723f64ffa607::t_4536c8cf9e7fb6 121-130
+  s_5b723f64ffa607::t_e9c42b388d118e 231-233,265-267
+  s_5b723f64ffa607::t_8a7a25882cbf20 29-30
+  s_5b723f64ffa607::t_b0d1d5cb6675b4 309-344
+  s_5b723f64ffa607::t_e733e2f9dd778c 345-366
+  s_5b723f64ffa607::t_237b37d35ecb5c 59-61,63-64
+  s_5b723f64ffa607::t_281c111fa782dd 90,136-137,174,186,216,230,247,264,286,299,377,390
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "d4c67c37107f414a47b5f270809f536afc54bcd6",
+  "prompts": {},
+  "sessions": {
+    "s_5b723f64ffa607": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b39288db-3011-429f-8252-1f5e7c3eabbb",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Tomasz Gorka <tomasz@gorka.org.pl>"
+    }
+  }
+}
