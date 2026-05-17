@@ -1,18 +1,46 @@
+# yaml-language-server: $schema=https://cubic.dev/schema/cubic-repository-config.schema.json
+
 version: 1
 
 reviews:
   enabled: true
-  sensitivity: medium
+  sensitivity: high
   incremental_commits: true
   check_drafts: false
   external_contributors_require_manual_review: true
   resolve_threads_when_addressed: true
-  auto_approve_behavior: disabled
-  auto_approve: disabled
+
+  # Stamp PRs when cubic judges them low-risk. `live` actually posts the
+  # approval (vs `shadow` which only previews it). External-contributor
+  # PRs still require manual trigger via the setting above.
+  auto_approve_behavior: live
+  auto_approve: low_risk_only
+
+  # Even when cubic deems a change low-risk, never rubber-stamp changes
+  # to the build/release surface — those need a human eyeball.
+  auto_approve_rules:
+    exclude:
+      - ".github/workflows/**"
+      - ".github/dependabot.yml"
+      - "cubic.yaml"
+      - "biome.json"
+      - "tsconfig.json"
+      - "package.json"
+      - "bun.lock"
+      - ".changeset/config.json"
+      - "LICENSE"
 
   custom_instructions: |
     Project conventions are documented in AGENTS.md and CONTRIBUTING.md;
     apply them when reviewing.
+
+    Review summary requirements (cubic.yaml has no native PR-score field,
+    so request this in the summary text):
+    - Begin every review summary with a single line of the form
+      `PR score: N/10` where N is your overall confidence that the PR is
+      safe to merge as-is (10 = ship it, 1 = blocking issues).
+    - Follow with a one-sentence justification of the score.
+    - Then list issues as usual.
 
     Quality gates that block merge:
     - `bun run check` (Biome lint + bun test) must exit 0
@@ -28,8 +56,9 @@ reviews:
     - Files: kebab-case.ts; tests colocated as <source>.test.ts
     - Prefer Bun-native APIs (Bun.file, Bun.write, Bun.YAML.parse, Bun.spawn)
 
-    Scope discipline:
-    - Never write outside `_bmad-output/` or standard build dirs
+    Runtime scope discipline (applies to running code / dispatched agents,
+    not to normal source edits):
+    - Runtime writes stay inside the project root
     - Never write to BMAD-installed files under
       `~/.claude/plugins/cache/bmad-method/` (read-only inputs)
 
