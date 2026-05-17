@@ -31,7 +31,7 @@ describe("runCommand", () => {
       cwd: "/var/empty/definitely-not-a-real-dir-12345",
     });
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("cwd does not exist");
+    expect(result.stderr).toMatch(/cwd does not exist|cwd not accessible/);
     // Critically: NOT 127, so detectGhOnPath wouldn't misclassify this.
     expect(result.exitCode).not.toBe(127);
   });

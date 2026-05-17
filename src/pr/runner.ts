@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import type { Runner, RunnerResult } from "./types.ts";
 
 function spawnPiped(
@@ -15,21 +15,26 @@ function spawnPiped(
 
 function badCwd(cwd: string | undefined): RunnerResult | null {
   if (cwd === undefined) return null;
-  if (!existsSync(cwd)) {
+  // Single syscall — no exists/stat TOCTOU window, no separate throw path.
+  try {
+    if (!statSync(cwd).isDirectory()) {
+      return {
+        stdout: "",
+        stderr: `cwd is not a directory: ${cwd}`,
+        exitCode: 1,
+      };
+    }
+    return null;
+  } catch (err) {
+    const code = (err as Error & { code?: unknown })?.code;
+    const detail = code === "ENOENT" ? "does not exist" : "not accessible";
+    const msg = err instanceof Error ? err.message : String(err);
     return {
       stdout: "",
-      stderr: `cwd does not exist: ${cwd}`,
+      stderr: `cwd ${detail}: ${cwd}: ${msg}`,
       exitCode: 1,
     };
   }
-  if (!statSync(cwd).isDirectory()) {
-    return {
-      stdout: "",
-      stderr: `cwd is not a directory: ${cwd}`,
-      exitCode: 1,
-    };
-  }
-  return null;
 }
 
 function isBinaryNotFound(err: unknown): boolean {
