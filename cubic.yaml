@@ -1,0 +1,75 @@
+version: 1
+
+reviews:
+  enabled: true
+  sensitivity: medium
+  incremental_commits: true
+  check_drafts: false
+  external_contributors_require_manual_review: true
+  resolve_threads_when_addressed: true
+  auto_approve_behavior: disabled
+  auto_approve: disabled
+
+  custom_instructions: |
+    Project conventions are documented in AGENTS.md and CONTRIBUTING.md;
+    apply them when reviewing.
+
+    Quality gates that block merge:
+    - `bun run check` (Biome lint + bun test) must exit 0
+    - `bunx tsc --noEmit` must exit 0
+    - Tests added/updated for any behavior change
+    - Changeset entry (`bun run changeset`) for user-visible changes;
+      skip for docs-only or chore PRs (see .github/PULL_REQUEST_TEMPLATE.md)
+
+    Code style (enforced by Biome 2.4, biome.json):
+    - 2-space indent, double quotes, semicolons
+    - No `console.log` in runtime code (`noConsole` is an error)
+    - No `any`; strict mode + `noUncheckedIndexedAccess` are on
+    - Files: kebab-case.ts; tests colocated as <source>.test.ts
+    - Prefer Bun-native APIs (Bun.file, Bun.write, Bun.YAML.parse, Bun.spawn)
+
+    Scope discipline:
+    - Never write outside `_bmad-output/` or standard build dirs
+    - Never write to BMAD-installed files under
+      `~/.claude/plugins/cache/bmad-method/` (read-only inputs)
+
+    BMAD artifacts (`_bmad-output/**`) are the source of truth for
+    planning + implementation work. Changes there should reference the
+    relevant story or spec ID in the PR description.
+
+  ignore:
+    files:
+      # BMAD artifacts and runtime caches — these are planning docs and
+      # regenerable state, not runtime code.
+      - "_bmad-output/**"
+      - "_bmad/**"
+      # Lockfile — diff is noise; reviewing dependency updates happens via
+      # the Dependabot PR's package.json diff.
+      - "bun.lock"
+      # Auto-managed by Changesets; review the .changeset/*.md entries
+      # in feature PRs instead.
+      - "CHANGELOG.md"
+      # Vendored dependencies and build output.
+      - "node_modules/**"
+      - "dist/**"
+      - "build/**"
+      - "coverage/**"
+    pr_labels:
+      - skip-review
+      - dependencies
+    pr_titles:
+      # Auto-generated "Version Packages" PR from the Changesets action.
+      - "^chore: version packages"
+
+pr_descriptions:
+  generate: true
+  instructions: |
+    Follow the structure in .github/PULL_REQUEST_TEMPLATE.md
+    (Description / Related Issues / Changesets / Quality Gates /
+    BMAD Artifacts). Keep the summary focused on user-visible impact and
+    the "why" of the change rather than a file-by-file recap.
+
+issues:
+  fix_with_cubic_buttons: true
+  pr_comment_fixes: true
+  fix_commits_to_pr: true
