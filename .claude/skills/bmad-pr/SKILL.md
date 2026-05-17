@@ -43,7 +43,7 @@ Run via Bash. Use `cd` only if the working directory isn't the repo root — the
 
 ## Handling output
 
-- **Exit 0**: stdout contains the PR URL (or, for `--dry-run`, the would-run plan). Surface the URL to the user.
+- **Exit 0**: surface stdout to the user as-is. For the default open/amend path, stdout is the PR URL on a single line. For `--dry-run`, stdout is the multi-line would-run plan.
 - **Exit 2 (refusal)**: stderr starts with `Refuse: ` followed by a single-line hint. Show the hint to the user verbatim. Do NOT try to work around it — refusals encode preconditions (trunk branch, missing `gh`, malformed ledger, not in a repo, etc.).
 - **Exit 1 (fail)**: stderr starts with `Error: ` — unexpected failure. Show it; offer to investigate.
 
