@@ -29,6 +29,13 @@ bun run check   # Biome lint + tests (release-blocker gate)
 
 This project uses the [BMAD method](https://github.com/bmad-code-org/BMAD-METHOD) via the [bmad-stepper](https://github.com/tgorka/bmad-stepper) plugin for Claude Code. Run `/bmad-next` to advance one step at a time, or `/bmad-loop` to iterate. Generated artifacts under `_bmad-output/` are tracked in git (planning + implementation specs are the source of truth); runtime caches under `_bmad-output/.stepper/`, `.archive/`, `.runs/` are gitignored.
 
+## /bmad-pr — Claude Code Skill
+
+Two surfaces are shipped:
+
+- **CLI** — `bun src/cli/bmad-pr.ts --story <e>.<s> --phase <name>` opens or amends a draft PR via `gh` and records the URL in `_bmad-output/stories/<e>.<s>.md`. Run `--help` for the full flag list. Deterministic, fully tested.
+- **Skill** — `/bmad-pr` slash-command in Claude Code, defined at `.claude/skills/bmad-pr/SKILL.md`. Auto-loaded for Claude Code sessions inside this repo. The skill derives `--story` and `--phase` from BMAD state, then dispatches to the CLI and surfaces the result.
+
 ## Style Checker
 
 Biome 2.4 enforces formatting (2-space indent, double quotes, semicolons) and lint rules (`noConsole`, `noUnusedVariables`, `noImplicitAnyLet`, `useExhaustiveDependencies`). The `_bmad-output/`, `_bmad/`, and build output directories are excluded from linting — see `biome.json`.
