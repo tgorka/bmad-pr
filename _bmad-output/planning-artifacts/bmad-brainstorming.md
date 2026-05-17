@@ -550,7 +550,7 @@ Combining all decisions into a coherent picture.
 ```
 /bmad-pr                              # standard: open or amend story/planning PR
 /bmad-pr --amend                      # force-amend even if no auto-detected match
-/bmad-pr --wip                        # draft at step start (default for stories)
+/bmad-pr --wip                        # opt-in: open draft PR at step start (redundant for stories — already WIP per D5)
 /bmad-pr --dry-run                    # preview PR body without opening (P4)
 /bmad-pr --auto-fix                   # remediate CH1/CH3/CH5 unsafe state
 /bmad-pr --tool gt|gh|git             # override tool selection
