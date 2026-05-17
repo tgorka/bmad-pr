@@ -4,6 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "bmad-pr": "bun src/cli/bmad-pr.ts",
     "test": "bun test --pass-with-no-tests",
     "test:watch": "bun test --watch --pass-with-no-tests",
     "lint": "biome lint .",
