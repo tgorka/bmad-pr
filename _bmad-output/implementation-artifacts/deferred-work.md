@@ -55,6 +55,15 @@ Depends on: G1. Touches bmad-stepper (out-of-repo dependency).
 
 Depends on: G1.
 
+## Review-surfaced defers (from G2 preflight review pass)
+
+- **CH3 staging granularity** — `git add _bmad-output/` stages every untracked + modified path under that tree, including ones the user has not yet reviewed. Consider `git add -u _bmad-output/` (only tracked modifications) or document the wider behavior. Currently documented in SKILL.md.
+- **CH1 race / `--trunk-branch HEAD`** — if the user sets `--trunk-branch HEAD`, the CLI refuses on the trunk check before CH1 ever runs. Currently surfaces a misleading trunk-refusal message. Tiny.
+- **CH1 + CH3 retry hints when auto-fix is in flight** — when a post-fix CH5/CH3 surfaces, the user sees the detector's "Try: bmad-pr --auto-fix" hint despite already passing the flag. Partially patched (suffix is stripped); double-check after G4 lands.
+- **`Date.now()` for CH1 auto-fix branch suffix** — not injectable via the CLI's `now` injector. Collision risk is real only for sub-second double-invocation. Defer.
+- **Pre-existing CH3 staging of unreviewed files** — see "CH3 staging granularity" above.
+- **Quoted-path corner cases under `-z`** — the new `-z` parser handles NUL framing correctly. The `unquote` helper was removed; if a future code path adds back human-readable porcelain parsing, restore the C-quote decoder.
+
 ## Review-surfaced defers (from G1+G3 review pass)
 
 These were found during step-04 review of the G1+G3 slice. Not blockers

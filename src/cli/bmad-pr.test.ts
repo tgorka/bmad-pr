@@ -408,6 +408,229 @@ describe("run refusals", () => {
   });
 });
 
+describe("run preflight (G2)", () => {
+  test("CH1 detached HEAD without --auto-fix refuses with exit 2", async () => {
+    const responses = happyResponses(tmp);
+    responses["git rev-parse --abbrev-ref"] = [
+      // CLI's detectBranch — also returns HEAD when detached
+      { exitCode: 0, stdout: "HEAD\n" },
+      // Preflight CH1 detector — same condition
+      { exitCode: 0, stdout: "HEAD\n" },
+    ];
+    const stderr: string[] = [];
+    const code = await run(["--story", "3.2", "--phase", "dev-story"], {
+      runner: harness(responses).runner,
+      cwd: tmp,
+      stdoutSink: () => {},
+      stderrSink: (s) => stderr.push(s),
+      now: () => new Date(),
+    });
+    expect(code).toBe(2);
+    expect(stderrOf(stderr)).toContain("detached HEAD");
+    expect(stderrOf(stderr)).toContain("--auto-fix");
+  });
+
+  test("CH1 with --auto-fix runs `git switch -c bmad-pr/<sha>-<ts>` and proceeds", async () => {
+    const responses = happyResponses(tmp);
+    // The CLI's detectBranch fires before preflight, so the call sequence is:
+    // 1) detectBranch → returns "HEAD" (detached)
+    // 2) preflight CH1 first probe → returns "HEAD" → triggers auto-fix
+    // 3) preflight CH1 second probe (after `git switch -c …`) → now on a branch
+    responses["git rev-parse --abbrev-ref"] = [
+      { exitCode: 0, stdout: "HEAD\n" },
+      { exitCode: 0, stdout: "HEAD\n" },
+      { exitCode: 0, stdout: "feat/x\n" },
+    ];
+    responses["git rev-parse --short=7 HEAD"] = [
+      { exitCode: 0, stdout: "abc1234\n" },
+    ];
+    responses["git switch"] = [{ exitCode: 0 }];
+    const { runner, calls } = harness(responses);
+    const code = await run(
+      ["--story", "3.2", "--phase", "dev-story", "--auto-fix"],
+      {
+        runner,
+        cwd: tmp,
+        stdoutSink: () => {},
+        stderrSink: () => {},
+        now: () => new Date("2026-05-17T14:22:03Z"),
+      },
+    );
+    expect(code).toBe(0);
+    const switchCall = calls.find(
+      (c) => c.cmd === "git" && c.args[0] === "switch",
+    );
+    expect(switchCall).toBeDefined();
+    expect(switchCall?.args[2] ?? "").toMatch(/^bmad-pr\/[0-9a-f]{7,}-\d+$/);
+  });
+
+  test("CH2 mid-rebase refuses even with --auto-fix", async () => {
+    const fs = await import("node:fs");
+    fs.mkdirSync(join(tmp, ".git", "rebase-merge"), { recursive: true });
+    const responses = happyResponses(tmp);
+    const stderr: string[] = [];
+    const code = await run(
+      ["--story", "3.2", "--phase", "dev-story", "--auto-fix"],
+      {
+        runner: harness(responses).runner,
+        cwd: tmp,
+        stdoutSink: () => {},
+        stderrSink: (s) => stderr.push(s),
+        now: () => new Date(),
+      },
+    );
+    expect(code).toBe(2);
+    expect(stderrOf(stderr)).toContain("interactive rebase in progress");
+  });
+
+  test("CH3 dirty tree without --auto-fix refuses", async () => {
+    const responses = happyResponses(tmp);
+    responses["git status --porcelain"] = [
+      { exitCode: 0, stdout: " M src/foo.ts\0" },
+    ];
+    const stderr: string[] = [];
+    const code = await run(["--story", "3.2", "--phase", "dev-story"], {
+      runner: harness(responses).runner,
+      cwd: tmp,
+      stdoutSink: () => {},
+      stderrSink: (s) => stderr.push(s),
+      now: () => new Date(),
+    });
+    expect(code).toBe(2);
+    expect(stderrOf(stderr)).toContain(
+      "unstaged changes outside _bmad-output/",
+    );
+  });
+
+  test("CH3 with --auto-fix and clean residue runs `git add _bmad-output/` and proceeds", async () => {
+    const responses = happyResponses(tmp);
+    responses["git status --porcelain"] = [
+      {
+        exitCode: 0,
+        stdout: " M _bmad-output/stories/3.2.md\0 M src/foo.ts\0",
+      }, // first: dirty
+      { exitCode: 0, stdout: "" }, // after `git add _bmad-output/`: clean (test fixture)
+    ];
+    responses["git add"] = [{ exitCode: 0 }];
+    const { runner, calls } = harness(responses);
+    const code = await run(
+      ["--story", "3.2", "--phase", "dev-story", "--auto-fix"],
+      {
+        runner,
+        cwd: tmp,
+        stdoutSink: () => {},
+        stderrSink: () => {},
+        now: () => new Date("2026-05-17T14:22:03Z"),
+      },
+    );
+    expect(code).toBe(0);
+    const addCalls = calls.filter(
+      (c) => c.cmd === "git" && c.args[0] === "add",
+    );
+    expect(addCalls).toHaveLength(1);
+    expect(addCalls[0]?.args).toEqual(["add", "_bmad-output/"]);
+  });
+
+  test("CH3 with --auto-fix but non-BMAD residue refuses", async () => {
+    const responses = happyResponses(tmp);
+    responses["git status --porcelain"] = [
+      { exitCode: 0, stdout: " M src/foo.ts\0" }, // first: dirty
+      { exitCode: 0, stdout: " M src/foo.ts\0" }, // after add: still dirty
+    ];
+    responses["git add"] = [{ exitCode: 0 }];
+    const stderr: string[] = [];
+    const code = await run(
+      ["--story", "3.2", "--phase", "dev-story", "--auto-fix"],
+      {
+        runner: harness(responses).runner,
+        cwd: tmp,
+        stdoutSink: () => {},
+        stderrSink: (s) => stderr.push(s),
+        now: () => new Date(),
+      },
+    );
+    expect(code).toBe(2);
+    expect(stderrOf(stderr)).toContain("CH3 auto-fix could not clean tree");
+  });
+
+  test("--dry-run + --auto-fix never mutates the repo (no fix invoked)", async () => {
+    const responses = happyResponses(tmp);
+    // CH3 trips; the would-be auto-fix is `git add _bmad-output/`. Under
+    // --dry-run, that command must NOT be invoked.
+    responses["git status --porcelain"] = [
+      { exitCode: 0, stdout: " M src/foo.ts\0" },
+    ];
+    responses["git add"] = [{ exitCode: 0 }];
+    const { runner, calls } = harness(responses);
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const code = await run(
+      ["--story", "3.2", "--phase", "dev-story", "--dry-run", "--auto-fix"],
+      {
+        runner,
+        cwd: tmp,
+        stdoutSink: (s) => stdout.push(s),
+        stderrSink: (s) => stderr.push(s),
+        now: () => new Date(),
+      },
+    );
+    expect(code).toBe(2);
+    expect(stderrOf(stderr)).toContain("--dry-run blocks auto-fix");
+    expect(stderrOf(stderr)).toContain("git add _bmad-output/");
+    // CRITICAL: not a single `git add` was invoked.
+    const addCalls = calls.filter(
+      (c) => c.cmd === "git" && c.args[0] === "add",
+    );
+    expect(addCalls).toHaveLength(0);
+    // Also no push or PR create.
+    expect(
+      calls.find((c) => c.cmd === "git" && c.args[0] === "push"),
+    ).toBeUndefined();
+    expect(
+      calls.find(
+        (c) => c.cmd === "gh" && c.args[0] === "pr" && c.args[1] === "create",
+      ),
+    ).toBeUndefined();
+  });
+
+  test("CH5 upstream ahead + --auto-fix conflict: rebase --abort runs and no push happens", async () => {
+    const responses = happyResponses(tmp);
+    responses["git rev-list --count"] = [
+      { exitCode: 0, stdout: "3\n" }, // first: ahead
+    ];
+    responses["git pull --rebase"] = [
+      { exitCode: 1, stderr: "CONFLICT (content): merge conflict" },
+    ];
+    responses["git rebase --abort"] = [{ exitCode: 0 }];
+    const { runner, calls } = harness(responses);
+    const stderr: string[] = [];
+    const code = await run(
+      ["--story", "3.2", "--phase", "dev-story", "--auto-fix"],
+      {
+        runner,
+        cwd: tmp,
+        stdoutSink: () => {},
+        stderrSink: (s) => stderr.push(s),
+        now: () => new Date(),
+      },
+    );
+    expect(code).toBe(2);
+    expect(stderrOf(stderr)).toContain("aborted");
+    const abortCall = calls.find(
+      (c) =>
+        c.cmd === "git" && c.args[0] === "rebase" && c.args[1] === "--abort",
+    );
+    expect(abortCall).toBeDefined();
+    // CRITICAL: never push or create after a CH5 conflict.
+    const pushCall = calls.find((c) => c.cmd === "git" && c.args[0] === "push");
+    expect(pushCall).toBeUndefined();
+    const createCall = calls.find(
+      (c) => c.cmd === "gh" && c.args[0] === "pr" && c.args[1] === "create",
+    );
+    expect(createCall).toBeUndefined();
+  });
+});
+
 describe("run --dry-run", () => {
   test("prints would-run plan, makes no side-effecting calls", async () => {
     const { runner, calls } = harness(happyResponses(tmp));
@@ -424,6 +647,7 @@ describe("run --dry-run", () => {
       },
     );
     expect(code).toBe(0);
+    expect(stdout.join("")).toContain("preflight: ok");
     expect(stdout.join("")).toContain("would run: git push");
     expect(stdout.join("")).toContain("would run: gh pr create");
     expect(stdout.join("")).toContain("ledger diff");

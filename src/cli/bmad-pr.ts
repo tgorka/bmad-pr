@@ -13,6 +13,7 @@ import {
   resolveStoryPath,
   updateEntry,
 } from "../pr/ledger.ts";
+import { runAutoFix, runPreflight } from "../pr/preflight.ts";
 import { runCommand } from "../pr/runner.ts";
 import { BmadPrError, type LedgerEntry, type Runner } from "../pr/types.ts";
 
@@ -31,6 +32,7 @@ type ParsedArgs = {
   runId?: string;
   amend: boolean;
   dryRun: boolean;
+  autoFix: boolean;
   trunkBranch: string;
 };
 
@@ -52,6 +54,10 @@ Options:
   --amend                   Force the amend path; refuse if no open
                             ledger entry exists for {story, phase}.
   --dry-run                 Print the would-run plan; no git/gh/file ops.
+  --auto-fix                Attempt safe remediation for CH1/CH3/CH5
+                            preflight failures (branch from HEAD; stage
+                            only _bmad-output/; rebase). CH2 is never
+                            auto-fixed.
   --trunk-branch <name>     Branch to refuse on (default: main).
   --help                    Show this message.
 
@@ -126,6 +132,12 @@ async function execute(args: ParsedArgs, ctx: ExecCtx): Promise<number> {
     );
   }
 
+  await preflightOrRefuse(ctx, repoRoot, args.autoFix, args.dryRun);
+
+  if (args.dryRun) {
+    ctx.stdout("preflight: ok\n");
+  }
+
   const ledger = await loadLedger(storyPath);
   const existing = findEntry(ledger.prs, { phase: args.phase });
 
@@ -194,6 +206,61 @@ async function execute(args: ParsedArgs, ctx: ExecCtx): Promise<number> {
   return 0;
 }
 
+async function preflightOrRefuse(
+  ctx: ExecCtx,
+  repoRoot: string,
+  autoFix: boolean,
+  dryRun: boolean,
+): Promise<void> {
+  const first = await runPreflight(ctx.runner, { repoRoot });
+  if (first.ok) return;
+  if (!autoFix || !first.autoFixable) {
+    throw new BmadPrError("refuse", first.hint);
+  }
+  if (dryRun) {
+    // --dry-run is a hard contract: zero side effects, ever. Auto-fix
+    // mutates the working tree (CH1 creates a branch, CH3 stages files,
+    // CH5 rewrites local history). Refuse instead, and surface a hint
+    // describing what a real --auto-fix would do.
+    const wouldFix = describeAutoFix(first.code);
+    throw new BmadPrError(
+      "refuse",
+      `${first.hint} (--dry-run blocks auto-fix; ${wouldFix})`,
+    );
+  }
+  const fixed = await runAutoFix(ctx.runner, first, { repoRoot });
+  if (!fixed.ok) {
+    throw new BmadPrError("refuse", fixed.hint);
+  }
+  const second = await runPreflight(ctx.runner, { repoRoot });
+  if (!second.ok) {
+    if (second.code === "CH3" && first.code === "CH3") {
+      throw new BmadPrError(
+        "refuse",
+        "CH3 auto-fix could not clean tree; non-BMAD changes remain.",
+      );
+    }
+    // We've already exhausted the single auto-fix attempt — strip any
+    // "Try: bmad-pr --auto-fix" suffix from the detector's hint so the user
+    // isn't told to retry a flag they already passed.
+    const hint = second.hint.replace(/ Try: bmad-pr --auto-fix[^.]*\.$/, "");
+    throw new BmadPrError("refuse", hint);
+  }
+}
+
+function describeAutoFix(code: string): string {
+  switch (code) {
+    case "CH1":
+      return "would run: git switch -c bmad-pr/<sha>-<ts>";
+    case "CH3":
+      return "would run: git add _bmad-output/";
+    case "CH5":
+      return "would run: git pull --rebase";
+    default:
+      return "no auto-fix";
+  }
+}
+
 async function resolveRepoRoot(runner: Runner, cwd: string): Promise<string> {
   const r = await runner("git", ["rev-parse", "--show-toplevel"], { cwd });
   if (r.exitCode !== 0) {
@@ -242,6 +309,7 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
     help: false,
     amend: false,
     dryRun: false,
+    autoFix: false,
     trunkBranch: "main",
   };
   const consumeValue = (flag: string, raw: string | undefined): string => {
@@ -262,6 +330,9 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
         break;
       case "--dry-run":
         out.dryRun = true;
+        break;
+      case "--auto-fix":
+        out.autoFix = true;
         break;
       case "--story":
         out.story = consumeValue("--story", argv[++i]);

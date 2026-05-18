@@ -39,3 +39,14 @@ export type Runner = (
 ) => Promise<RunnerResult>;
 
 export type DriverOpts = { cwd?: string };
+
+export type PreflightCode = "CH1" | "CH2" | "CH3" | "CH5";
+
+export type PreflightResult =
+  | { ok: true }
+  | {
+      ok: false;
+      code: PreflightCode;
+      hint: string;
+      autoFixable: boolean;
+    };
