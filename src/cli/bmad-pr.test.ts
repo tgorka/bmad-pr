@@ -553,6 +553,46 @@ describe("run preflight (G2)", () => {
     expect(stderrOf(stderr)).toContain("CH3 auto-fix could not clean tree");
   });
 
+  test("--dry-run + --auto-fix never mutates the repo (no fix invoked)", async () => {
+    const responses = happyResponses(tmp);
+    // CH3 trips; the would-be auto-fix is `git add _bmad-output/`. Under
+    // --dry-run, that command must NOT be invoked.
+    responses["git status --porcelain"] = [
+      { exitCode: 0, stdout: " M src/foo.ts\0" },
+    ];
+    responses["git add"] = [{ exitCode: 0 }];
+    const { runner, calls } = harness(responses);
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const code = await run(
+      ["--story", "3.2", "--phase", "dev-story", "--dry-run", "--auto-fix"],
+      {
+        runner,
+        cwd: tmp,
+        stdoutSink: (s) => stdout.push(s),
+        stderrSink: (s) => stderr.push(s),
+        now: () => new Date(),
+      },
+    );
+    expect(code).toBe(2);
+    expect(stderrOf(stderr)).toContain("--dry-run blocks auto-fix");
+    expect(stderrOf(stderr)).toContain("git add _bmad-output/");
+    // CRITICAL: not a single `git add` was invoked.
+    const addCalls = calls.filter(
+      (c) => c.cmd === "git" && c.args[0] === "add",
+    );
+    expect(addCalls).toHaveLength(0);
+    // Also no push or PR create.
+    expect(
+      calls.find((c) => c.cmd === "git" && c.args[0] === "push"),
+    ).toBeUndefined();
+    expect(
+      calls.find(
+        (c) => c.cmd === "gh" && c.args[0] === "pr" && c.args[1] === "create",
+      ),
+    ).toBeUndefined();
+  });
+
   test("CH5 upstream ahead + --auto-fix conflict: rebase --abort runs and no push happens", async () => {
     const responses = happyResponses(tmp);
     responses["git rev-list --count"] = [

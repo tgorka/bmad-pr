@@ -132,7 +132,7 @@ async function execute(args: ParsedArgs, ctx: ExecCtx): Promise<number> {
     );
   }
 
-  await preflightOrRefuse(ctx, repoRoot, args.autoFix);
+  await preflightOrRefuse(ctx, repoRoot, args.autoFix, args.dryRun);
 
   if (args.dryRun) {
     ctx.stdout("preflight: ok\n");
@@ -210,11 +210,23 @@ async function preflightOrRefuse(
   ctx: ExecCtx,
   repoRoot: string,
   autoFix: boolean,
+  dryRun: boolean,
 ): Promise<void> {
   const first = await runPreflight(ctx.runner, { repoRoot });
   if (first.ok) return;
   if (!autoFix || !first.autoFixable) {
     throw new BmadPrError("refuse", first.hint);
+  }
+  if (dryRun) {
+    // --dry-run is a hard contract: zero side effects, ever. Auto-fix
+    // mutates the working tree (CH1 creates a branch, CH3 stages files,
+    // CH5 rewrites local history). Refuse instead, and surface a hint
+    // describing what a real --auto-fix would do.
+    const wouldFix = describeAutoFix(first.code);
+    throw new BmadPrError(
+      "refuse",
+      `${first.hint} (--dry-run blocks auto-fix; ${wouldFix})`,
+    );
   }
   const fixed = await runAutoFix(ctx.runner, first, { repoRoot });
   if (!fixed.ok) {
@@ -233,6 +245,19 @@ async function preflightOrRefuse(
     // isn't told to retry a flag they already passed.
     const hint = second.hint.replace(/ Try: bmad-pr --auto-fix[^.]*\.$/, "");
     throw new BmadPrError("refuse", hint);
+  }
+}
+
+function describeAutoFix(code: string): string {
+  switch (code) {
+    case "CH1":
+      return "would run: git switch -c bmad-pr/<sha>-<ts>";
+    case "CH3":
+      return "would run: git add _bmad-output/";
+    case "CH5":
+      return "would run: git pull --rebase";
+    default:
+      return "no auto-fix";
   }
 }
 
