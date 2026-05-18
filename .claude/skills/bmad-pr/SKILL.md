@@ -47,6 +47,17 @@ Run via Bash. Use `cd` only if the working directory isn't the repo root — the
 - **Exit 2 (refusal)**: stderr starts with `Refuse: ` followed by a single-line hint. Show the hint to the user verbatim. Do NOT try to work around it — refusals encode preconditions (trunk branch, missing `gh`, malformed ledger, not in a repo, etc.).
 - **Exit 1 (fail)**: stderr starts with `Error: ` — unexpected failure. Show it; offer to investigate.
 
+## Preflight refusals (G2)
+
+Before any state-changing op, the CLI runs four git-safety detectors in order. First failure wins:
+
+- **CH1** — detached HEAD. Auto-fixable with `--auto-fix` (branches from current HEAD as `bmad-pr/<sha>-<ts>`).
+- **CH2** — interactive rebase or merge in progress. **Never auto-fixed** — the user must `git rebase --continue`/`--abort` (or the merge equivalent) before re-running.
+- **CH3** — unstaged changes outside `_bmad-output/`. Auto-fixable: `git add _bmad-output/` (never `-A`, never non-BMAD paths). If non-BMAD residue remains, refuses again.
+- **CH5** — upstream branch is ahead of HEAD. Auto-fixable: `git pull --rebase`; on conflict the rebase is aborted and the CLI refuses.
+
+When a refusal hint ends with `Try: bmad-pr --auto-fix`, that is the only flag to retry with. Do not work around CH2 (rebase/merge in progress). Pass `--auto-fix` only when the user explicitly OKs the remediation, since it modifies the working tree (CH1 creates a branch, CH3 stages files, CH5 rewrites the local branch).
+
 ## Default behavior — open vs amend
 
 The CLI's default auto-detects via the ledger at `_bmad-output/stories/<epic>.<story>.md`:
