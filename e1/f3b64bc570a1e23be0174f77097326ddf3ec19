@@ -1,0 +1,69 @@
+src/pr/types.ts
+  s_5b723f64ffa607::t_f6b055e51cc38a 42-52
+.changeset/bmad-pr-g2-preflight.md
+  s_5b723f64ffa607::t_78da2c5e7a300a 1-23
+src/cli/bmad-pr.test.ts
+  s_5b723f64ffa607::t_f5c4ad5261331d 435-438,440-442
+  s_5b723f64ffa607::t_82ae2d32e2e110 510
+  s_5b723f64ffa607::t_de90fe40b7b769 415-417
+  s_5b723f64ffa607::t_b66bb3fa25960e 489
+  s_5b723f64ffa607::t_a5d27c9a828998 411-414,418-434,439,443-488,490-500,502-509,511-527,529-536,539-593
+  s_5b723f64ffa607::t_797bb9b37b580f 537-538
+  s_5b723f64ffa607::t_010b7d9e11c2b8 610
+.claude/skills/bmad-pr/SKILL.md
+  s_5b723f64ffa607::t_81d9cb57ed48cb 50-60
+src/pr/preflight.ts
+  s_5b723f64ffa607::t_ab91e8433a1aaa 151
+  s_5b723f64ffa607::t_0f65c51e7cd9bf 13,20-34
+  s_5b723f64ffa607::t_e5760ae3ded5fb 3-12,14-19,35-55,66-91,96-98,107-111,130-143,145-150,152-232,249-257
+  s_5b723f64ffa607::t_003fd5da10d6e8 56-65
+  s_5b723f64ffa607::t_514555cea5daac 233-248
+  s_5b723f64ffa607::t_891747bb82feee 92-95,99-106,112-129
+  s_5b723f64ffa607::t_1df9485b3995b6 1-2
+src/cli/bmad-pr.ts
+  ai_agent 234
+  s_5b723f64ffa607::t_4f5073efd4bad0 309-311
+  s_5b723f64ffa607::t_62bcb426c25160 135-140
+  s_5b723f64ffa607::t_16654b4acd4359 209-230,236-238
+  s_5b723f64ffa607::t_bbad4cc92fad71 287
+  s_5b723f64ffa607::t_33f9a6f286e839 16
+  s_5b723f64ffa607::t_3f86769b156598 231-233,235
+  s_5b723f64ffa607::t_2b7f8ed904d474 35
+  s_5b723f64ffa607::t_3141ed39e27d06 57-60
+src/pr/preflight.test.ts
+  s_5b723f64ffa607::t_bf5b5b7a8990ce 183
+  s_5b723f64ffa607::t_e5714801112b0a 203,209-226
+  s_5b723f64ffa607::t_95e398c3b3732e 1-53,55,57-71,73-122,124-137,139-146,149-151,153-164,166-182,184-188,190-199,201-202,204-208,227-240,242-262,264-289,291-349
+  s_5b723f64ffa607::t_880208a907ccc3 165
+  s_5b723f64ffa607::t_eeeddf3e3da6c1 54,56
+  s_5b723f64ffa607::t_88a0036606d37c 138
+  s_5b723f64ffa607::t_dd09e8759fcba8 189
+  s_5b723f64ffa607::t_eed284f2ca283f 241,263
+  s_5b723f64ffa607::t_f6724aebadc1ca 123
+  ai_agent 152
+  s_5b723f64ffa607::t_0b9b68573316c1 147-148
+_bmad-output/implementation-artifacts/deferred-work.md
+  s_5b723f64ffa607::t_71a7465cdee382 58-66
+_bmad-output/implementation-artifacts/spec-g2-git-safety-preflight.md
+  s_5b723f64ffa607::t_4a37d69e72d25d 1-4,6-16,18,20-23,32-33,36,38-41,58-62,64,70-73,79-80,88-90,92,94,96-108
+  s_5b723f64ffa607::t_30b0118f13c36b 110-153
+  s_5b723f64ffa607::t_ebbe472981e775 5
+  s_5b723f64ffa607::t_b15892e12dbc8c 17,19,24-31,34-35,37,42-51,53-57,63,65-69,74-78,81-87,91,93,95,109
+  s_5b723f64ffa607::t_51bd0d545a14b1 52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "e1f3b64bc570a1e23be0174f77097326ddf3ec19",
+  "prompts": {},
+  "sessions": {
+    "s_5b723f64ffa607": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b39288db-3011-429f-8252-1f5e7c3eabbb",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Tomasz Gorka <tomasz@gorka.org.pl>"
+    }
+  }
+}
