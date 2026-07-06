@@ -1,0 +1,8 @@
+# bmad-pr placement for the long BMAD methodology's unattended dev sessions.
+# Install as {project-root}/_bmad/custom/bmad-dev-auto.toml (or merge the
+# [workflow] key). bmad-dev-auto runs workflow.on_complete inside its HALT
+# protocol — after the dev/review session wrote its terminal result — so the
+# hook fires in unattended loop runs as well.
+
+[workflow]
+on_complete = "Ship this story as a PR: invoke the bmad-pr skill (ship --story <story key> --phase dev-story), then run the bmad-pr-loop skill to watch CI and the AI reviewer and address findings until the PR is green. If the loop cannot finish unattended, record the blocking findings in the terminal result instead of waiting."

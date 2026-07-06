@@ -1,53 +1,64 @@
 # AGENTS.md
 
-The contract for AI coding agents (Claude Code, Codex, etc.) and human contributors working on this repo.
+The contract for AI coding agents (Claude Code, Codex, etc.) and human
+contributors working on this repo.
 
 ## What this project is
 
-A BMAD-method project. Planning, implementation, and retrospective artifacts live under `_bmad-output/` and ARE the spec — read them before making non-trivial changes. Use `/bmad-next` to advance one BMAD step at a time; use `/bmad-loop` to iterate.
+A Claude Code plugin (bash + markdown, no build step) that ships BMAD
+stories as stacked PRs and drives external AI review cycles. The repo root
+is the plugin. BMAD artifacts under `_bmad-output/` ARE the spec — read
+`_bmad-output/planning-artifacts/architecture-plugin-rewrite.md` (decision
+register R1–R14) before non-trivial changes. The pre-rewrite TypeScript
+implementation is archived at tag `v0-ts-cli`; do not resurrect it.
 
 ## Repo layout
 
-- `_bmad-output/` — BMAD artifacts (committed). Brainstorming, planning, implementation, tests, retros. Source of truth for "what we are building and why."
-- `_bmad-output/.stepper/`, `.archive/`, `.runs/` — runtime caches (gitignored, regenerable).
-- `_bmad/` — BMAD shared config (`config.yaml` committed; `config.user.yaml` is per-contributor and gitignored).
-- `src/` — TypeScript source (when present). Tests colocated as `<source>.test.ts`.
-- `biome.json`, `tsconfig.json`, `bunfig.toml`, `package.json` — runtime + tooling config.
+- `.claude-plugin/` — plugin + marketplace manifests.
+- `skills/*/SKILL.md` — the Claude-facing orchestration layer. Skills derive
+  arguments and interpret exit codes; they never re-implement CLI logic.
+- `scripts/bmad-pr` — the deterministic CLI. `scripts/lib/*.sh` — sourced
+  modules (config, ledger, preflight, backends, reviewer engine, findings).
+- `scripts/lib/reviewers/*.sh` — reviewer provider profiles (set-if-unset
+  variables only; behavior lives in `reviewer.sh`).
+- `integration/` — templates the setup skill installs into target projects.
+- `tests/*.bats` — bats suite; helpers in `tests/helpers/`.
+- `module.yaml`, `module-help.csv` — BMAD module identity/registration.
+- `_bmad-output/` — this project's own BMAD artifacts (committed).
 
 ## Quality gates
 
-Every change must satisfy:
+Every change must satisfy `scripts/check.sh` exit 0:
 
-- `bun run check` exits 0 (Biome lint + `bun test`).
-- `bunx tsc --noEmit` exits 0.
-- Tests added or updated for any behavior change.
-- Changeset entry added via `bun run changeset` for user-visible changes.
+- `bash -n` on every shell file; `shellcheck --severity=warning` clean.
+- Plugin manifests parse; every `skills/*/SKILL.md` has `name` +
+  `description` frontmatter; `module-help.csv` columns consistent.
+- `tests/run.sh` green. Tests added/updated for any behavior change.
 
-## Code conventions
+## Conventions
 
-- Files: `kebab-case.ts`. Tests colocated, named `<source>.test.ts`.
-- TypeScript: `camelCase` for functions/variables, `PascalCase` for types (no `I` prefix), `SCREAMING_SNAKE_CASE` for constants.
-- No `console.log` in runtime code (Biome enforces `noConsole` as an error). Use a logger module or stderr for one-off CLI status.
-- No `any`. Strict mode is on; respect `noUncheckedIndexedAccess`.
-- Async = `async/await`. Prefer Bun-native APIs (`Bun.file`, `Bun.write`, `Bun.YAML.parse`, `Bun.spawn`).
-- Biome 2.4 only — no ESLint/Prettier.
+- Bash: `set -euo pipefail` in executables; libs are `# shellcheck
+  shell=bash` sourced files. 2-space indent, `snake_case` functions,
+  `BMAD_PR_*` for exported config. Beware `set -e` + `[[ ... ]] && cmd` as
+  a function's last line (add `return 0`).
+- Exit-code contract is frozen (R9): 0 ok, 1 unexpected, 2 refuse,
+  3 findings, 4 checks failed, 5 timeout, 6 reviewer absent. `refuse()` for
+  precondition failures with a how-to-proceed message; `die()` for bugs.
+- All GitHub JSON goes through `jq` (never `gh --jq` with variables — it
+  can't bind them). Paginated `gh api` output merges with `jq -s`.
+- Ledger writes only via `ledger_write` (atomic tmp+mv). Never hand-edit
+  `_bmad-output/pr/*.json` in code paths.
+- Tests: throwaway git repos via `make_repo`/`add_origin`, network tools
+  stubbed via `make_stub` (`tests/helpers/`). Tests must not touch the
+  network or this repo's own `_bmad-output/`.
+- Commits: conventional (`feat(bmad-pr): ...`); PRs to `main`; CI must be
+  green.
 
-## Runtime scope discipline
+## Do / Don't
 
-These rules cover what *running code and dispatched agents may write to on disk during execution* — they do not restrict normal source edits to files in this repo. Editing `src/`, configs, docs, and `_bmad-output/` artifacts is expected; follow `CONTRIBUTING.md`.
-
-- Runtime writes stay inside the project root (this repo's working tree). Don't touch paths outside it unless the user explicitly asks.
-- Inside the repo, runtime/generated state belongs under `_bmad-output/` (and standard build dirs like `dist/`, `coverage/`, `node_modules/`). Avoid scattering generated files elsewhere.
-- Never write to BMAD-installed files under `~/.claude/plugins/cache/bmad-method/` — read-only inputs.
-- Atomic writes (tmp + rename) when modifying anything under `_bmad-output/.stepper/`.
-
-## Test patterns
-
-- Colocate tests next to source (`<source>.test.ts`). No `tests/` dir inside `src/`.
-- Filesystem-touching tests use `mkdtemp(path.join(os.tmpdir(), "bmad-pr-<concern>-"))` and clean up in `afterEach`.
-- Tests never touch `_bmad-output/` (the project's own BMAD state).
-- Unique test ID prefix per concern (e.g., `STORY_12_*`).
-
-## When in doubt
-
-Read the latest planning + implementation artifacts under `_bmad-output/` to find the in-flight story or spec. If the request conflicts with an existing artifact, surface the conflict to the user rather than silently re-deciding.
+- DO keep skills thin — argument derivation + exit-code interpretation.
+- DO update `integration/config.env.example` when adding config keys.
+- DON'T call `gh pr create` outside `backend-gh.sh` — stacking, ledger and
+  preflight guarantees live there.
+- DON'T add runtime dependencies beyond bash/git/jq/gh/gt without updating
+  the architecture doc and README requirements.

@@ -1,0 +1,9 @@
+# bmad-pr placement for the BMAD quick-dev flow.
+# Install as {project-root}/_bmad/custom/bmad-quick-dev.toml (or merge the
+# [workflow] key into the existing file). Quick Dev resolves
+# workflow.on_complete at its final step and follows it as the terminal
+# instruction — i.e. right after the review-order presentation, spec done,
+# and the local commit.
+
+[workflow]
+on_complete = "Ship this work as a PR: invoke the bmad-pr skill (ship --story <story key> --phase quick-dev), then run the bmad-pr-loop skill to watch CI and the AI reviewer and address findings until the PR is green."
