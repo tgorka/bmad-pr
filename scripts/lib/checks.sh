@@ -35,7 +35,9 @@ checks_failing() {
 }
 
 # checks_wait <pr> <timeout_sec> — poll with backoff until a terminal verdict.
-# Prints pass|fail|none; rc 0. On deadline prints pending; rc 1.
+# Prints pass|fail|none; rc 0. On deadline prints pending; rc 1. Prints
+# error; rc 1 when the checks API itself keeps failing — a hard gh failure
+# must not masquerade as a CI timeout.
 # "none" after the grace window means the repo has no checks configured —
 # check suites register a few seconds after push, hence the grace.
 checks_wait() {
@@ -44,9 +46,18 @@ checks_wait() {
   local grace_deadline=$(($(epoch) + 90))
   ((grace_deadline > deadline)) && grace_deadline=$deadline
   local interval="${BMAD_PR_POLL_INTERVAL:-15}"
-  local agg
+  local agg snapshot null_streak=0
   while :; do
-    agg="$(checks_snapshot "$pr" | checks_aggregate)"
+    snapshot="$(checks_snapshot "$pr")"
+    if [[ "$snapshot" == null ]]; then
+      ((++null_streak >= 3)) && {
+        printf 'error\n'
+        return 1
+      }
+    else
+      null_streak=0
+    fi
+    agg="$(checks_aggregate <<<"$snapshot")"
     case "$agg" in
       none)
         (($(epoch) >= grace_deadline)) && {

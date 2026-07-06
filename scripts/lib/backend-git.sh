@@ -31,7 +31,15 @@ git_ship() {
   local url
   url="$(git_compare_url "$(git remote get-url origin)")"
   log "no PR backend available — branch pushed; open the PR manually:"
-  log "  $url/compare/$parent...$branch?expand=1"
+  case "$url" in
+    https://github.*)
+      log "  $url/compare/$parent...$branch?expand=1"
+      ;;
+    *)
+      # The ?expand compare link is GitHub-specific — stay host-agnostic.
+      log "  create a PR/MR from '$branch' into '$parent' on your host: $url"
+      ;;
+  esac
   printf '\t\n'
 }
 

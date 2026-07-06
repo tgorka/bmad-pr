@@ -2,7 +2,16 @@
 # PR ledger: one JSON file per story key under $BMAD_PR_LEDGER_DIR (R3).
 # All writes are atomic (tmp + mv); all reads go through jq.
 
-ledger_dir() { printf '%s/%s' "$(repo_root)" "$BMAD_PR_LEDGER_DIR"; }
+# Ledger writes must stay inside the repository — refuse absolute paths and
+# traversal segments in the configured dir.
+ledger_dir() {
+  case "/$BMAD_PR_LEDGER_DIR/" in
+    //* | *"/../"* | *"/./"*)
+      refuse "BMAD_PR_LEDGER_DIR must be a repo-relative path without '..' segments (got: $BMAD_PR_LEDGER_DIR)"
+      ;;
+  esac
+  printf '%s/%s' "$(repo_root)" "$BMAD_PR_LEDGER_DIR"
+}
 
 ledger_path() {
   printf '%s/%s.json' "$(ledger_dir)" "$(sanitize_key "$1")"

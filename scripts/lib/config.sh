@@ -57,6 +57,15 @@ config_load() {
 
   config_defaults
 
+  # Authoritative traversal guard: ledger_dir re-checks this, but functions
+  # used inside command substitutions cannot abort the caller — this runs in
+  # the main shell, so a bad value stops the CLI before any path is built.
+  case "/$BMAD_PR_LEDGER_DIR/" in
+    //* | *"/../"* | *"/./"*)
+      refuse "BMAD_PR_LEDGER_DIR must be a repo-relative path without '..' segments (got: $BMAD_PR_LEDGER_DIR)"
+      ;;
+  esac
+
   local profile="${LIB_SOURCE_DIR}/reviewers/${BMAD_PR_REVIEWER}.sh"
   if [[ "$BMAD_PR_REVIEWER" != "none" ]]; then
     if [[ -f "$profile" ]]; then

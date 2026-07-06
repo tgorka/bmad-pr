@@ -51,6 +51,18 @@ EOF
   [ "$(echo null | checks_failing)" = "[]" ]
 }
 
+@test "checks_wait reports error after repeated API failures (not a fake timeout)" {
+  stub_init
+  make_stub gh <<'EOF'
+echo "HTTP 502" >&2
+exit 1
+EOF
+  export BMAD_PR_POLL_INTERVAL=1
+  run checks_wait 42 30
+  [ "$status" -eq 1 ]
+  [ "$output" = "error" ]
+}
+
 @test "findings_render emits a score finding when below threshold" {
   run findings_render 3.2 42 '[]' '[]' 5 false
   [ "$status" -eq 0 ]
@@ -99,6 +111,7 @@ EOF
 - [ ] [Review][Patch] open one [b.sh:2] <!-- thread:T_two -->
 - [X] [Review][Patch] fixed two [c.sh:3] <!-- thread:T_three -->
 - [x] [Review][Patch] CI check failing: test <!-- check:test -->
+- [x] [Review][Patch] malformed tag <!-- thread: -->
 EOF
   run findings_addressed_thread_ids 3.2
   [ "$status" -eq 0 ]

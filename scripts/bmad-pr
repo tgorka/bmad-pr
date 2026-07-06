@@ -299,10 +299,17 @@ cmd_ship() {
 # stdout via INGEST_VERDICT.
 do_ingest() {
   local key=$1 pr=$2
-  local threads='[]' failing='[]' score="" approved=false head_sha=""
+  local threads='[]' failing='[]' score="" approved=false head_sha="" snapshot
 
-  failing="$(checks_snapshot "$pr" | checks_failing)"
-  if [[ "${BMAD_PR_REVIEWER:-none}" != none ]] && backend_query_available; then
+  # Fail loud on fetch errors — ingesting "no findings" because an API call
+  # failed would green-light a PR nobody actually reviewed.
+  snapshot="$(checks_snapshot "$pr")"
+  [[ "$snapshot" != null ]] ||
+    die "could not fetch CI checks for PR #$pr (gh auth? network? rate limit?)"
+  failing="$(checks_failing <<<"$snapshot")"
+  if [[ "${BMAD_PR_REVIEWER:-none}" != none ]]; then
+    backend_query_available ||
+      die "reviewer '$BMAD_PR_REVIEWER' is configured but gh is unavailable or unauthenticated — cannot ingest reviewer findings"
     threads="$(reviewer_unresolved_threads "$pr")"
     score="$(reviewer_latest_score "$pr")"
     approved="$(reviewer_approved "$pr")"
@@ -426,7 +433,12 @@ cmd_watch() {
 
   log "watching PR #$PR_NUMBER (story $KEY, head ${head_sha:0:7}, timeout ${timeout}s)"
 
-  if ! checks_result="$(checks_wait "$PR_NUMBER" "$timeout")"; then
+  local checks_rc=0
+  checks_result="$(checks_wait "$PR_NUMBER" "$timeout")" || checks_rc=$?
+  if ((checks_rc != 0)); then
+    if [[ "$checks_result" == error ]]; then
+      die "could not fetch CI checks for PR #$PR_NUMBER (gh auth? network? rate limit?)"
+    fi
     log "CI checks still pending at deadline"
     exit "$EX_TIMEOUT"
   fi

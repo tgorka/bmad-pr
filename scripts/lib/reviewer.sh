@@ -26,7 +26,8 @@ reviewer_check_state() {
   gh api "repos/$(repo_slug)/commits/$sha/check-runs" 2>/dev/null |
     jq -r --arg re "$BMAD_PR_REVIEWER_CHECK_REGEX" '
       [.check_runs[] | select(.name | test($re; "i"))]
-      | last | .status // "missing"' || printf 'missing\n'
+      | sort_by(.started_at // "") | last | .status // "missing"' ||
+    printf 'missing\n'
 }
 
 # All PR reviews (merged across pages) → JSON array. Fails fast on API
@@ -128,11 +129,11 @@ reviewer_wait() {
 # reviewer_unresolved_threads <pr> → JSON array of
 # {id, path, line, author, body} for unresolved, non-outdated bot threads.
 reviewer_unresolved_threads() {
-  local pr=$1 owner name slug
+  local pr=$1 owner name slug out
   slug="$(repo_slug)"
   owner="${slug%%/*}"
   name="${slug##*/}"
-  gh api graphql --paginate \
+  out="$(gh api graphql --paginate \
     -f owner="$owner" -f repo="$name" -F pr="$pr" \
     -f query='
       query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
@@ -153,8 +154,9 @@ reviewer_unresolved_threads() {
             }
           }
         }
-      }' 2>/dev/null |
-    jq -s --arg bot "$BMAD_PR_REVIEWER_BOT_REGEX" '
+      }' 2>/dev/null)" ||
+    die "gh api graphql failed listing review threads for PR $pr (auth? network? rate limit?)"
+  jq -s --arg bot "$BMAD_PR_REVIEWER_BOT_REGEX" '
       [ .[].data.repository.pullRequest.reviewThreads.nodes[]
         | select(.isResolved == false and .isOutdated == false)
         | select((.comments.nodes[0].author.login // "") | test($bot; "i"))
@@ -163,7 +165,7 @@ reviewer_unresolved_threads() {
             line,
             author: .comments.nodes[0].author.login,
             body: (.comments.nodes[0].body // "") }
-      ]' || printf '[]\n'
+      ]' <<<"$out"
 }
 
 # reviewer_resolve_threads <thread-id>... — batched aliased mutations.

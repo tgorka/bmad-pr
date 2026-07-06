@@ -89,6 +89,27 @@ new_entry() { # key branch parent_branch parent_pr number openedAt
   [ ! -e "$REPO/_bmad-output/pr/nope.json" ]
 }
 
+@test "config_load refuses traversal or absolute BMAD_PR_LEDGER_DIR" {
+  run bash -c "
+    export LIB_SOURCE_DIR='$LIB_DIR' BMAD_PR_LEDGER_DIR='../outside'
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/config.sh'
+    config_load '$REPO'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"repo-relative"* ]]
+  run bash -c "
+    export LIB_SOURCE_DIR='$LIB_DIR' BMAD_PR_LEDGER_DIR='/tmp/abs'
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/config.sh'
+    config_load '$REPO'"
+  [ "$status" -eq 2 ]
+}
+
+@test "ledger_dir itself refuses traversal (defense in depth)" {
+  export BMAD_PR_LEDGER_DIR='../outside'
+  run ledger_dir
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"repo-relative"* ]]
+}
+
 @test "keys are sanitized in filenames" {
   new_entry 'evil/../key' bmad/story/x "" "" 7 2026-07-01T10:00:00Z
   [ -f "$REPO/_bmad-output/pr/evil-..-key.json" ]

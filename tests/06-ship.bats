@@ -87,7 +87,7 @@ write_ledger() { # key branch parent_branch parent_pr number state openedAt
 
   run "$BMAD_PR_BIN" ship --story 3.2 --phase code-review
   [ "$status" -eq 0 ]
-  gh_called "pr edit 42 --body-file"
+  gh_called "pr edit 42" "--title BMAD: 3.2 code-review" "--body-file"
   gh_not_called "pr create"
   local entry="$REPO/_bmad-output/pr/3.2.json"
   [ "$(jq -r '.phase' "$entry")" = "code-review" ]
@@ -147,6 +147,8 @@ write_ledger() { # key branch parent_branch parent_pr number state openedAt
   run "$BMAD_PR_BIN" ship --story 3.2 --phase dev-story
   [ "$status" -eq 0 ]
   [[ "$output" == *"open the PR manually"* ]]
+  # local-path remote is not GitHub → host-agnostic instructions, no ?expand link
+  [[ "$output" == *"create a PR/MR from"* ]]
   git ls-remote --exit-code --heads origin bmad/story/3.2 >/dev/null
   [ "$(jq -r '.pr.number' "$REPO/_bmad-output/pr/3.2.json")" = "null" ]
   [ "$(jq -r '.branch' "$REPO/_bmad-output/pr/3.2.json")" = "bmad/story/3.2" ]

@@ -15,11 +15,22 @@ if [[ ! -x "$bats_dir/bin/bats" ]]; then
   tarball="$vendor_dir/bats-core-$BATS_VERSION.tar.gz"
   url="https://github.com/bats-core/bats-core/archive/refs/tags/v$BATS_VERSION.tar.gz"
   curl -fsSL "$url" -o "$tarball"
-  echo "$BATS_SHA256  $tarball" | sha256sum -c --quiet - || {
+  # Portable digest: coreutils sha256sum (Linux) or shasum (macOS). Fail
+  # closed when neither exists — never extract an unverified tarball.
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$tarball" | cut -d' ' -f1)"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$tarball" | cut -d' ' -f1)"
+  else
     rm -f "$tarball"
-    echo "vendor failed: checksum mismatch for $url" >&2
+    echo "vendor failed: neither sha256sum nor shasum available to verify $url" >&2
     exit 1
-  }
+  fi
+  if [[ "$actual" != "$BATS_SHA256" ]]; then
+    rm -f "$tarball"
+    echo "vendor failed: checksum mismatch for $url (got $actual)" >&2
+    exit 1
+  fi
   tar -xzf "$tarball" -C "$vendor_dir"
   rm -f "$tarball"
   [[ -x "$bats_dir/bin/bats" ]] || {

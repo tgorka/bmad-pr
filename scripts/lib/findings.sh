@@ -74,7 +74,7 @@ findings_addressed_thread_ids() {
   local file
   file="$(findings_path "$1")"
   [[ -f "$file" ]] || return 0
-  sed -n 's/^- \[[xX]\] .*<!-- thread:\([A-Za-z0-9_=-]*\) -->.*/\1/p' "$file"
+  sed -n 's/^- \[[xX]\] .*<!-- thread:\([A-Za-z0-9_=-]\{1,\}\) -->.*/\1/p' "$file"
 }
 
 # findings_open_count <key> — unchecked items still in the file.
