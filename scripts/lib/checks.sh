@@ -2,20 +2,27 @@
 # Pre-submit CI checks via gh. Normalize on `bucket` (pass|fail|pending|
 # skipping|cancel) — not `state` — per gh 2.95 semantics.
 
-# checks_snapshot <pr> → JSON array [{name,bucket,link,description}].
-# gh pr checks exits non-zero on fail/pending, so don't trust the exit code;
-# trust the JSON. Empty output (no checks yet, API error) → [].
+# checks_snapshot <pr> → JSON array [{name,bucket,link,description}], or
+# `null` when the gh call itself failed (auth/network/API error).
+# gh pr checks exits non-zero on fail/pending too, so don't trust the exit
+# code — trust whether the output parses as an array. A hard API failure
+# must NOT read as "no checks": that would let watch proceed false-green.
 checks_snapshot() {
   local out
   out="$(gh pr checks "$1" --json name,bucket,link,description 2>/dev/null || true)"
-  [[ -n "$out" ]] || out='[]'
+  if ! jq -e 'type == "array"' >/dev/null 2>&1 <<<"$out"; then
+    printf 'null\n'
+    return 0
+  fi
   printf '%s\n' "$out"
 }
 
 # stdin: snapshot JSON → pass | fail | pending | none
+# (null → pending: keep waiting / time out rather than false-green)
 checks_aggregate() {
   jq -r '
-    if length == 0 then "none"
+    if . == null then "pending"
+    elif length == 0 then "none"
     elif any(.[]; .bucket == "fail" or .bucket == "cancel") then "fail"
     elif any(.[]; .bucket == "pending") then "pending"
     else "pass"
@@ -24,7 +31,7 @@ checks_aggregate() {
 
 # stdin: snapshot JSON → JSON array of failing checks
 checks_failing() {
-  jq '[.[] | select(.bucket == "fail" or .bucket == "cancel")]'
+  jq 'if . == null then [] else [.[] | select(.bucket == "fail" or .bucket == "cancel")] end'
 }
 
 # checks_wait <pr> <timeout_sec> — poll with backoff until a terminal verdict.
@@ -35,6 +42,7 @@ checks_wait() {
   local pr=$1 timeout=$2
   local deadline=$(($(epoch) + timeout))
   local grace_deadline=$(($(epoch) + 90))
+  ((grace_deadline > deadline)) && grace_deadline=$deadline
   local interval="${BMAD_PR_POLL_INTERVAL:-15}"
   local agg
   while :; do

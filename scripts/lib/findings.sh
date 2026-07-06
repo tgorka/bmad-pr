@@ -12,9 +12,13 @@ findings_path() {
 #                 <score> <approved> → markdown on stdout
 findings_render() {
   local key=$1 pr=$2 threads_json=$3 checks_json=$4 score=$5 approved=$6
-  local n_threads n_checks
+  local n_threads n_checks below_threshold=false
   n_threads="$(jq 'length' <<<"$threads_json")"
   n_checks="$(jq 'length' <<<"$checks_json")"
+  if [[ "$approved" != true && -n "$score" ]] &&
+    ((score < ${BMAD_PR_SCORE_THRESHOLD:-8})); then
+    below_threshold=true
+  fi
 
   cat <<EOF
 # PR review findings — story $key (PR #$pr)
@@ -36,11 +40,16 @@ Mark addressed items \`[x]\`, then run:
 ## Findings
 EOF
 
-  if ((n_threads == 0 && n_checks == 0)); then
+  if ((n_threads == 0 && n_checks == 0)) && [[ "$below_threshold" == false ]]; then
     printf '\nNone — the PR is clean from this provider'\''s perspective.\n'
     return 0
   fi
   printf '\n'
+
+  if [[ "$below_threshold" == true ]]; then
+    printf -- '- [ ] [Review][Patch] Reviewer score %s/10 is below threshold %s — address the summary review feedback on the PR <!-- score:%s -->\n' \
+      "$score" "${BMAD_PR_SCORE_THRESHOLD:-8}" "$score"
+  fi
 
   jq -r '
     def title:

@@ -29,11 +29,14 @@ reviewer_check_state() {
       | last | .status // "missing"' || printf 'missing\n'
 }
 
-# All PR reviews (merged across pages) → JSON array.
+# All PR reviews (merged across pages) → JSON array. Fails fast on API
+# errors — treating them as "no reviews" would let watch/ingest report a
+# false green.
 reviewer_reviews() {
-  local pr=$1
-  gh api --paginate "repos/$(repo_slug)/pulls/$pr/reviews" 2>/dev/null |
-    jq -s 'add // []' || printf '[]\n'
+  local pr=$1 out
+  out="$(gh api --paginate "repos/$(repo_slug)/pulls/$pr/reviews" 2>/dev/null)" ||
+    die "gh api failed listing reviews for PR $pr (auth? network? rate limit?)"
+  jq -s 'add // []' <<<"$out"
 }
 
 # reviewer_latest_score <pr> → the captured score number, or empty.
@@ -88,13 +91,16 @@ reviewer_completed() {
   esac
 }
 
-# reviewer_wait <pr> <sha> <timeout_sec> → prints completed|absent|timeout.
-# rc 0 for completed, 1 otherwise. "absent" = no lifecycle signal appeared
-# within the grace window (reviewer not installed, draft skipped, ignored).
+# reviewer_wait <pr> <sha> <timeout_sec> [since_iso] → prints
+# completed|absent|timeout. rc 0 for completed, 1 otherwise. "absent" = no
+# lifecycle signal within the grace window (reviewer not installed, draft
+# skipped, ignored). Only check-run mode has a lifecycle signal to miss —
+# bot-review providers (no check run) get the full timeout, not the grace.
 reviewer_wait() {
   local pr=$1 sha=$2 timeout=$3 since=${4:-}
   local deadline=$(($(epoch) + timeout))
   local grace_deadline=$(($(epoch) + 180))
+  ((grace_deadline > deadline)) && grace_deadline=$deadline
   local interval="${BMAD_PR_POLL_INTERVAL:-15}"
   local seen_signal=false state
   while :; do
@@ -105,10 +111,10 @@ reviewer_wait() {
     if [[ "${BMAD_PR_REVIEWER_COMPLETION:-check-run}" == "check-run" ]]; then
       state="$(reviewer_check_state "$sha")"
       [[ "$state" == "queued" || "$state" == "in_progress" ]] && seen_signal=true
-    fi
-    if [[ "$seen_signal" == false ]] && (($(epoch) >= grace_deadline)); then
-      printf 'absent\n'
-      return 1
+      if [[ "$seen_signal" == false ]] && (($(epoch) >= grace_deadline)); then
+        printf 'absent\n'
+        return 1
+      fi
     fi
     (($(epoch) >= deadline)) && {
       printf 'timeout\n'

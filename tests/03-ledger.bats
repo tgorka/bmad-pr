@@ -71,6 +71,24 @@ new_entry() { # key branch parent_branch parent_pr number openedAt
   [ "$status" -eq 1 ]
 }
 
+@test "newest_open refuses on unparseable ledger JSON instead of de-stacking" {
+  new_entry 3.1 bmad/story/3.1 "" "" 40 2026-07-01T10:00:00Z
+  echo '{broken' >"$REPO/_bmad-output/pr/zz.json"
+  run ledger_newest_open 3.3
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"could not parse ledger files"* ]]
+}
+
+@test "ledger_write rejects entries missing required fields" {
+  run bash -c "
+    cd '$REPO'
+    export LIB_SOURCE_DIR='$LIB_DIR' BMAD_PR_LEDGER_DIR=_bmad-output/pr
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/ledger.sh'
+    echo '{\"schema\": 1}' | ledger_write nope"
+  [ "$status" -eq 1 ]
+  [ ! -e "$REPO/_bmad-output/pr/nope.json" ]
+}
+
 @test "keys are sanitized in filenames" {
   new_entry 'evil/../key' bmad/story/x "" "" 7 2026-07-01T10:00:00Z
   [ -f "$REPO/_bmad-output/pr/evil-..-key.json" ]

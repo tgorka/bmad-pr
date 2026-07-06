@@ -442,15 +442,20 @@ cmd_watch() {
     exit "$EX_OK"
   fi
 
-  local remaining reviewer_result
+  # Only reviews submitted after the last ship/amend count as this cycle's
+  # completion — without `since`, bot-review providers would match a stale
+  # review from a previous iteration and ingest old findings.
+  local since remaining reviewer_result
+  since="$(jq -r '.lastAmendedAt // empty' <<<"$ENTRY")"
   remaining=$((deadline - $(epoch)))
   ((remaining < 30)) && remaining=30
-  reviewer_result="$(reviewer_wait "$PR_NUMBER" "$head_sha" "$remaining")" || true
+  reviewer_result="$(reviewer_wait "$PR_NUMBER" "$head_sha" "$remaining" "$since")" || true
   log "reviewer: $reviewer_result"
   case "$reviewer_result" in
     completed) ;;
     absent) exit "$EX_NO_REVIEWER" ;;
     timeout) exit "$EX_TIMEOUT" ;;
+    *) die "reviewer wait returned unexpected state: '${reviewer_result:-<empty>}'" ;;
   esac
 
   do_ingest "$KEY" "$PR_NUMBER"

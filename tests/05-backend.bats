@@ -74,6 +74,14 @@ EOF
   [ "$output" = "gt" ]
 }
 
+@test "git_compare_url normalizes ssh, ssh-proto and https remotes" {
+  source "$LIB_DIR/backend-git.sh"
+  [ "$(git_compare_url 'git@github.com:owner/repo.git')" = "https://github.com/owner/repo" ]
+  [ "$(git_compare_url 'https://github.com/owner/repo.git')" = "https://github.com/owner/repo" ]
+  [ "$(git_compare_url 'ssh://git@github.com/owner/repo.git')" = "https://github.com/owner/repo" ]
+  [ "$(git_compare_url 'https://github.com/owner/repo')" = "https://github.com/owner/repo" ]
+}
+
 @test "gt binary without repo init falls through to gh" {
   git remote add origin git@github.com:o/r.git
   make_stub gh <<'EOF'

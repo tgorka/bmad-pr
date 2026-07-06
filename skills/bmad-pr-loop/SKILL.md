@@ -29,6 +29,7 @@ Derive `<key>` as in the bmad-pr skill. The story must already have a PR
 | 5 | Timeout | Report what is still pending; ask the user whether to keep waiting (re-run `watch`) or stop. Do not iterate blindly against a stuck check. |
 | 6 | Reviewer absent/skipped | Diagnose: PR still draft with reviewer configured to skip drafts? Ignore rules? Reviewer app not installed? Report; continue without reviewer only if the user agrees. |
 | 2 | Refusal | Read stderr (usually: no ledger/PR yet — run ship first). |
+| 1 | Unexpected failure | Show stderr verbatim, stop the loop, and report — do not retry blindly (typical causes: gh auth, network, rate limit). |
 
 ## Address findings
 

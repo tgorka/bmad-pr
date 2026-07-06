@@ -41,6 +41,8 @@ note "skill frontmatter"
 shopt -s nullglob
 for f in skills/*/SKILL.md; do
   head -1 "$f" | grep -qx -- '---' || err "$f: missing frontmatter open"
+  awk 'NR > 1 && /^---$/ { found = 1; exit } END { exit !found }' "$f" ||
+    err "$f: missing frontmatter close"
   frontmatter="$(sed -n '2,/^---$/p' "$f")"
   grep -q '^name:' <<<"$frontmatter" || err "$f: frontmatter missing name"
   grep -q '^description:' <<<"$frontmatter" || err "$f: frontmatter missing description"
@@ -57,6 +59,8 @@ tests/run.sh || err "tests"
 if ((fail)); then
   echo
   err "gate failed"
-  exit 1
+  # 4 = "checks failed" in the bmad-pr exit contract — keeps gate failures
+  # machine-distinguishable from unexpected script errors (1).
+  exit 4
 fi
 note "gate passed"

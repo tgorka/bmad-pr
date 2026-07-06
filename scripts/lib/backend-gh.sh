@@ -44,17 +44,19 @@ gh_pr_comment() {
 }
 
 # gh_retarget <number> <new_base> <branch> <old_parent_sha>
-# Parent merged: retarget the PR base, rebase our branch off the old parent
-# tip onto the new base, push with lease. The only force-push in the tool.
+# Parent merged: rebase our branch off the old parent tip onto the new base,
+# push with lease, THEN retarget the PR base — a rebase conflict must not
+# leave the PR pointing at a base its branch was never rebased onto. The
+# only force-push in the tool.
 gh_retarget() {
   local number=$1 new_base=$2 branch=$3 old_parent_sha=$4
-  gh pr edit "$number" --base "$new_base" >/dev/null ||
-    die "gh pr edit --base $new_base failed"
   git fetch origin >&2
   git rebase --onto "origin/$new_base" "$old_parent_sha" "$branch" >&2 || {
     git rebase --abort >&2 || true
-    refuse "rebase onto origin/$new_base hit conflicts; resolve manually (git rebase --onto origin/$new_base $old_parent_sha $branch)"
+    refuse "rebase onto origin/$new_base hit conflicts; resolve manually (git rebase --onto origin/$new_base $old_parent_sha $branch), then re-run retarget"
   }
   git push --force-with-lease origin "$branch" >&2 ||
     die "git push --force-with-lease failed after retarget"
+  gh pr edit "$number" --base "$new_base" >/dev/null ||
+    die "gh pr edit --base $new_base failed (branch already rebased and pushed; re-run retarget)"
 }

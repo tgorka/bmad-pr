@@ -37,6 +37,33 @@ setup() {
   [ "$(echo "$json" | checks_aggregate)" = "pass" ]
 }
 
+@test "checks_snapshot yields null on gh failure (not a false-green [])" {
+  stub_init
+  make_stub gh <<'EOF'
+echo "HTTP 502" >&2
+exit 1
+EOF
+  [ "$(checks_snapshot 42)" = "null" ]
+}
+
+@test "checks_aggregate/failing treat null as pending with no failures" {
+  [ "$(echo null | checks_aggregate)" = "pending" ]
+  [ "$(echo null | checks_failing)" = "[]" ]
+}
+
+@test "findings_render emits a score finding when below threshold" {
+  run findings_render 3.2 42 '[]' '[]' 5 false
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"- [ ] [Review][Patch] Reviewer score 5/10 is below threshold 8"* ]]
+  [[ "$output" != *"None — the PR is clean"* ]]
+}
+
+@test "findings_render approved PR is clean even with low score" {
+  run findings_render 3.2 42 '[]' '[]' 5 true
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"None — the PR is clean"* ]]
+}
+
 @test "findings_render emits BMAD [Review][Patch] items with thread tags" {
   threads='[{"id":"PRRT_abc","path":"src/a.sh","line":12,"author":"cubic-dev-ai",
              "body":"**Unquoted variable**\nThis can word-split.\nQuote it."}]'

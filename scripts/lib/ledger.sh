@@ -26,7 +26,10 @@ ledger_write() {
   mkdir -p "$(dirname "$path")"
   tmp="$path.tmp.$$"
   cat >"$tmp"
-  if ! jq -e '.schema == 1' "$tmp" >/dev/null 2>&1; then
+  # Same shape validation as ledger_read — never persist what read would
+  # later refuse.
+  if ! jq -e '.schema == 1 and (.story | type == "string") and (.branch | type == "string")' \
+    "$tmp" >/dev/null 2>&1; then
     rm -f "$tmp"
     die "internal: refusing to write invalid ledger JSON for $key"
   fi
@@ -45,13 +48,17 @@ ledger_newest_open() {
   local -a files=("$dir"/*.json)
   [[ -e "${files[0]}" ]] || return 1
   local out
+  # A jq parse failure must refuse, not read as "no open parent" — silently
+  # de-stacking onto trunk because one ledger file is corrupt would be worse
+  # than stopping.
   out="$(jq -s --arg ex "$exclude" '
     [ .[]
       | select(.schema == 1)
       | select((.story // "" | gsub("[^A-Za-z0-9._-]"; "-")) != $ex)
       | select(.pr.state == "open")
     ] | sort_by(.openedAt) | last // empty
-  ' "${files[@]}")"
+  ' "${files[@]}")" ||
+    refuse "could not parse ledger files in $dir — fix or remove the malformed JSON, then re-run"
   [[ -n "$out" ]] || return 1
   printf '%s\n' "$out"
 }
