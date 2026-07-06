@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "bmad-pr",
+  "version": "1.0.0",
+  "description": "Ships each BMAD story as a draft PR stacked on the previous story's PR (gt/gh/git), monitors pre-submit CI and external AI reviewers (cubic.dev first), ingests reviewer findings into BMAD review format, and drives the address → push → re-review cycle.",
+  "author": {
+    "name": "Tomasz Gorka",
+    "url": "https://github.com/tgorka"
+  },
+  "homepage": "https://github.com/tgorka/bmad-pr",
+  "repository": "https://github.com/tgorka/bmad-pr",
+  "license": "MIT",
+  "keywords": ["bmad", "pull-request", "stacked-prs", "code-review", "cubic", "graphite"],
+  "skills": "./skills/"
+}

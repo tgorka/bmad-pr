@@ -1,0 +1,4 @@
+module,skill,display-name,menu-code,description,action,args,phase,preceded-by,followed-by,required,output-location,outputs
+bmad-pr,bmad-pr,Ship story PR,PR,Open or amend the draft PR for the current story (stacked on the previous story's PR),skill,story+phase,implementation,code-review,bmad-pr-loop,false,_bmad-output/pr/,ledger entry + PR URL
+bmad-pr,bmad-pr-loop,PR review cycle,PRL,Watch CI + AI reviewer on the story PR and drive the address→push→re-review loop until green,skill,story,implementation,bmad-pr,retrospective,false,_bmad-output/pr/,findings file + resolved threads
+bmad-pr,bmad-pr-setup,Setup bmad-pr,PRS,Register the module and place bmad-pr after review sessions (quick-dev / dev-auto / bmad-loop),skill,,setup,,,false,_bmad/,config + placement overrides

@@ -1,85 +1,33 @@
-# ─── OS: macOS ───────────────────────────────────────────────────────────────
+# ─── OS ──────────────────────────────────────────────────────────────────────
 .DS_Store
 .DS_Store?
 ._*
-.Spotlight-V100
-.Trashes
-.AppleDouble
-.LSOverride
-Icon
-.DocumentRevisions-V100
-.fseventsd
-.TemporaryItems
-.VolumeIcon.icns
-.com.apple.timemachine.donotpresent
-
-# ─── OS: Windows ─────────────────────────────────────────────────────────────
 Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
-ehthumbs_vista.db
 desktop.ini
 $RECYCLE.BIN/
-*.lnk
-*.stackdump
-[Dd]esktop.ini
-
-# ─── OS: Linux ───────────────────────────────────────────────────────────────
 *~
-.fuse_hidden*
-.directory
-.Trash-*
-.nfs*
 
 # ─── Editors / IDEs ──────────────────────────────────────────────────────────
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
-!.vscode/launch.json
-!.vscode/tasks.json
 .idea/
 *.swp
 *.swo
-*~
 .*.sw[a-p]
 .history/
 
-# ─── Bun ─────────────────────────────────────────────────────────────────────
-node_modules/
-.pnp.*
-.yarn/cache
-.yarn/unplugged
-.yarn/build-state.yml
-.yarn/install-state.gz
-# NOTE: bun.lock / bun.lockb are committed (reproducible installs).
-
-# ─── TypeScript / Build outputs ──────────────────────────────────────────────
-dist/
-build/
-out/
-*.tsbuildinfo
-.tsc-cache/
-
-# ─── Tests / Coverage ────────────────────────────────────────────────────────
-coverage/
-*.lcov
-.nyc_output/
-.bun-test-cache/
+# ─── Test tooling (vendored on demand by tests/vendor.sh) ────────────────────
+tests/.vendor/
 
 # ─── Logs ────────────────────────────────────────────────────────────────────
 *.log
 logs/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-bun-debug.log*
 
 # ─── Environment / Secrets ───────────────────────────────────────────────────
 .env
 .env.*
 !.env.example
-!.env.template
 *.pem
 *.key
 secrets/
@@ -88,16 +36,9 @@ secrets/
 *.tmp
 *.temp
 .tmp/
-.temp/
 .cache/
 *.bak
 *.orig
-
-# ─── Custom / Local overrides ────────────────────────────────────────────────
-custom/
-*.custom
-*.local
-*.local.*
 
 # ─── Claude Code (local-only state) ──────────────────────────────────────────
 .claude/settings.local.json
@@ -106,13 +47,9 @@ custom/
 
 # ─── BMAD personal config (per-contributor, never shared) ────────────────────
 _bmad/config.user.yaml
+_bmad/custom/*.user.toml
 
-# ─── Stepper runtime state (regenerable, project-local) ──────────────────────
+# ─── BMAD runtime state (regenerable, project-local) ─────────────────────────
 _bmad-output/.stepper/
 _bmad-output/.archive/
 _bmad-output/.runs/
-
-# ─── Misc ────────────────────────────────────────────────────────────────────
-.release-state
-*.tgz
-.npm/
