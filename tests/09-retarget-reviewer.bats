@@ -74,6 +74,18 @@ make_stack() {
   [ "$(git rev-parse HEAD)" = "$CHILD_SHA" ]
 }
 
+@test "retarget --dry-run plans and mutates nothing" {
+  make_stack
+  run "$BMAD_PR_BIN" retarget --story 3.2 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"plan: rebase bmad/story/3.2"* ]]
+  gh_not_called "pr edit"
+  # branch untouched locally and on the remote
+  [ "$(git rev-parse HEAD)" = "$CHILD_SHA" ]
+  [ "$(git rev-parse origin/bmad/story/3.2)" = "$CHILD_SHA" ]
+  [ "$(jq -r '.parentPr' "$REPO/_bmad-output/pr/3.2.json")" = "41" ]
+}
+
 @test "retarget refuses when parent PR is not merged" {
   make_stack
   export GH_STUB_PR_STATE_JSON='{"state":"OPEN","baseRefName":"main"}'
@@ -91,6 +103,19 @@ run_reviewer_wait() { # timeout since
     export BMAD_PR_POLL_INTERVAL=1
     source '$LIB_DIR/common.sh'; source '$LIB_DIR/reviewer.sh'
     reviewer_wait 42 deadbeef '$1' '$2'"
+}
+
+@test "reviewer_latest_score truncates decimal captures from generic regexes" {
+  export GH_STUB_REVIEWS='[{"user":{"login":"coderabbitai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T12:00:00Z","body":"score: 7.5"}]'
+  run bash -c "
+    cd '$REPO'
+    export PATH='$STUB_DIR:$PATH' LIB_SOURCE_DIR='$LIB_DIR'
+    export BMAD_PR_REVIEWER_BOT_REGEX='^coderabbitai'
+    export BMAD_PR_SCORE_REGEX='score: ([0-9.]+)'
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/reviewer.sh'
+    reviewer_latest_score 42"
+  [ "$status" -eq 0 ]
+  [ "$output" = "7" ]
 }
 
 @test "reviewer_wait bot-review: fresh review completes" {

@@ -42,9 +42,10 @@ checks_failing() {
 # check suites register a few seconds after push, hence the grace.
 checks_wait() {
   local pr=$1 timeout=$2
-  local deadline=$(($(epoch) + timeout))
-  local grace="${BMAD_PR_REGISTER_GRACE:-90}"
-  local grace_deadline=$(($(epoch) + grace))
+  local deadline grace grace_deadline
+  deadline=$(($(epoch) + timeout))
+  grace="${BMAD_PR_REGISTER_GRACE:-90}"
+  grace_deadline=$(($(epoch) + grace))
   ((grace_deadline > deadline)) && grace_deadline=$deadline
   local interval="${BMAD_PR_POLL_INTERVAL:-15}"
   local agg snapshot null_streak=0

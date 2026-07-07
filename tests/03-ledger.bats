@@ -13,7 +13,7 @@ setup() {
 }
 
 new_entry() { # key branch parent_branch parent_pr number openedAt
-  ledger_new_entry "$1" "$2" "$3" "sha$4" "$4" "$5" \
+  ledger_new_entry "$1" "$2" "$3" "${4:+sha$4}" "$4" "$5" \
     "https://github.com/o/r/pull/$5" dev-story run-1 gh |
     jq --arg t "$6" '.openedAt = $t' | ledger_write "$1"
 }

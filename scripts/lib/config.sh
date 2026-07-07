@@ -25,6 +25,14 @@ BMAD_PR_CONFIG_KEYS=(
   BMAD_PR_MAX_ITERATIONS    # review-cycle ceiling (used by the loop skill)
 )
 
+config_is_known_key() {
+  local key=$1 known
+  for known in "${BMAD_PR_CONFIG_KEYS[@]}"; do
+    [[ "$known" == "$key" ]] && return 0
+  done
+  return 1
+}
+
 config_defaults() {
   : "${BMAD_PR_TOOL:=auto}"
   : "${BMAD_PR_TRUNK:=main}"
@@ -54,6 +62,12 @@ config_load() {
       if [[ "$line" =~ ^(BMAD_PR_[A-Z0-9_]+)=(.*)$ ]]; then
         key="${BASH_REMATCH[1]}"
         value="${BASH_REMATCH[2]}"
+        if ! config_is_known_key "$key"; then
+          # A typo would otherwise be stored and silently ignored, leaving
+          # the intended variable unset.
+          warn "unknown config key in $file: $key (ignored — see integration/config.env.example)"
+          continue
+        fi
         # Strip one layer of matching quotes; everything else is literal —
         # no expansion, no substitution.
         if [[ "$value" =~ ^\"(.*)\"$ || "$value" =~ ^\'(.*)\'$ ]]; then

@@ -18,7 +18,7 @@ setup() {
   HEAD_SHA="$(git rev-parse HEAD)"
   export GH_STUB_HEAD_SHA="$HEAD_SHA"
   mkdir -p "$REPO/_bmad-output/pr"
-  jq -n --arg sha "" '
+  jq -n '
     {schema: 1, story: "3.2", branch: "bmad/story/3.2", parentBranch: null,
      parentSha: null, parentPr: null,
      pr: {number: 42, url: "https://github.com/o/r/pull/42", state: "open"},
@@ -36,7 +36,7 @@ set_reviewed() { # sha
 
 @test "watch: green checks + completed clean review → exit 0" {
   export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
-  export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic — AI code review","status":"completed"}]}'
+  export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic — AI code review","status":"completed","started_at":"2026-07-06T11:30:00Z","completed_at":"2026-07-06T12:00:00Z"}]}'
   export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T10:00:00Z","commit_id":"'"$HEAD_SHA"'","body":"PR score: 9/10\nLooks good."}]'
   run "$BMAD_PR_BIN" watch --story 3.2
   [ "$status" -eq 0 ]
@@ -55,7 +55,7 @@ set_reviewed() { # sha
 
 @test "watch: unresolved reviewer threads → exit 3" {
   export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
-  export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic","status":"completed"}]}'
+  export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic","status":"completed","started_at":"2026-07-06T11:30:00Z","completed_at":"2026-07-06T12:00:00Z"}]}'
   export GH_STUB_GRAPHQL='{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"T_a","isResolved":false,"isOutdated":false,"path":"x.sh","line":3,"comments":{"nodes":[{"author":{"login":"cubic-dev-ai"},"body":"Bug here"}]}}]}}}}}'
   run "$BMAD_PR_BIN" watch --story 3.2
   [ "$status" -eq 3 ]
@@ -64,7 +64,7 @@ set_reviewed() { # sha
 
 @test "watch: completed review with score below threshold → exit 3" {
   export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
-  export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic","status":"completed"}]}'
+  export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic","status":"completed","started_at":"2026-07-06T11:30:00Z","completed_at":"2026-07-06T12:00:00Z"}]}'
   export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T10:00:00Z","commit_id":"'"$HEAD_SHA"'","body":"PR score: 5/10"}]'
   run "$BMAD_PR_BIN" watch --story 3.2
   [ "$status" -eq 3 ]
@@ -86,6 +86,30 @@ set_reviewed() { # sha
   [ "$(jq -r '.verdict' <<<"$output")" = "green" ]
   [ "$(jq -r '.approved' <<<"$output")" = "true" ]
   [ "$(jq -r '.score' <<<"$output")" = "10" ]
+}
+
+@test "watch: completed check run from BEFORE the re-review trigger doesn't count" {
+  export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
+  # run completed at 12:00, but the re-review was triggered at 13:00 —
+  # watch must keep waiting for the new run, not ingest pre-trigger state
+  export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic","status":"completed","started_at":"2026-07-06T11:30:00Z","completed_at":"2026-07-06T12:00:00Z"}]}'
+  jq '.reviewer.lastTriggeredAt = "2026-07-06T13:00:00Z"' \
+    "$REPO/_bmad-output/pr/3.2.json" >"$REPO/_bmad-output/pr/3.2.json.new"
+  mv "$REPO/_bmad-output/pr/3.2.json.new" "$REPO/_bmad-output/pr/3.2.json"
+  run "$BMAD_PR_BIN" watch --story 3.2 --timeout 2
+  [ "$status" -eq 5 ] || [ "$status" -eq 6 ]
+}
+
+@test "rereview --dry-run plans without pushing, resolving, or commenting" {
+  set_reviewed "0000000000000000000000000000000000000000"
+  git commit -q --allow-empty -m "pending fix"
+  run "$BMAD_PR_BIN" rereview --story 3.2 --resolve-addressed --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"plan: resolve addressed threads=true"* ]]
+  gh_not_called "pr comment"
+  gh_not_called "resolveReviewThread"
+  # pending commit was NOT pushed
+  [ "$(git rev-list --count '@{u}..HEAD')" = "1" ]
 }
 
 @test "rereview: same SHA, nothing resolved → no trigger (dedupe R12)" {
@@ -145,7 +169,7 @@ EOF
 
 @test "watch: score and approval for an older commit are stale and don't count" {
   export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
-  export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic","status":"completed"}]}'
+  export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic","status":"completed","started_at":"2026-07-06T11:30:00Z","completed_at":"2026-07-06T12:00:00Z"}]}'
   export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"APPROVED","submitted_at":"2026-07-06T10:00:00Z","commit_id":"olderolderolderolderolderolderolderolder","body":"PR score: 10/10"}]'
   run "$BMAD_PR_BIN" watch --story 3.2
   [ "$status" -eq 0 ]

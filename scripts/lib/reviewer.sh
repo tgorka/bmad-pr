@@ -16,18 +16,23 @@ repo_slug() {
   printf '%s\n' "$_BMAD_PR_REPO_SLUG"
 }
 
-# reviewer_check_state <sha> → queued|in_progress|completed|missing
-reviewer_check_state() {
+# reviewer_check_latest <sha> → the newest matching check run (JSON), or null.
+reviewer_check_latest() {
   local sha=$1
   if [[ -z "${BMAD_PR_REVIEWER_CHECK_REGEX:-}" ]]; then
-    printf 'missing\n'
+    printf 'null\n'
     return 0
   fi
   gh api "repos/$(repo_slug)/commits/$sha/check-runs" 2>/dev/null |
-    jq -r --arg re "$BMAD_PR_REVIEWER_CHECK_REGEX" '
+    jq --arg re "$BMAD_PR_REVIEWER_CHECK_REGEX" '
       [.check_runs[] | select(.name | test($re; "i"))]
-      | sort_by(.started_at // "") | last | .status // "missing"' ||
-    printf 'missing\n'
+      | sort_by(.started_at // "") | last // null' ||
+    printf 'null\n'
+}
+
+# reviewer_check_state <sha> → queued|in_progress|completed|missing
+reviewer_check_state() {
+  reviewer_check_latest "$1" | jq -r '.status // "missing"'
 }
 
 # All PR reviews (merged across pages) → JSON array. Fails fast on API
@@ -44,9 +49,9 @@ reviewer_reviews() {
 # empty. When head_sha is given, only reviews of that commit count — a
 # score from an earlier revision must not green-light freshly pushed code.
 reviewer_latest_score() {
-  local pr=$1 sha=${2:-}
+  local pr=$1 sha=${2:-} raw
   [[ -n "${BMAD_PR_SCORE_REGEX:-}" ]] || return 0
-  reviewer_reviews "$pr" |
+  raw="$(reviewer_reviews "$pr" |
     jq -r --arg bot "$BMAD_PR_REVIEWER_BOT_REGEX" --arg re "$BMAD_PR_SCORE_REGEX" \
       --arg sha "$sha" '
       [ .[]
@@ -57,7 +62,16 @@ reviewer_latest_score() {
       ] | sort_by(.submitted_at) | last
       | if . == null then empty
         else (.body | match($re) | .captures[0].string)
-        end'
+        end')"
+  [[ -z "$raw" ]] && return 0
+  # Downstream comparisons are bash integer arithmetic — truncate decimals
+  # (rounding down biases toward "findings", the safe direction) and drop
+  # anything non-numeric a generic provider regex might capture.
+  if [[ "$raw" =~ ^[0-9]+ ]]; then
+    printf '%s\n' "${BASH_REMATCH[0]}"
+  else
+    warn "ignoring non-numeric reviewer score: '$raw'"
+  fi
 }
 
 # reviewer_approved <pr> [head_sha] → prints true|false. Scoped to the
@@ -80,7 +94,17 @@ reviewer_completed() {
   local pr=$1 sha=$2 since=${3:-}
   case "${BMAD_PR_REVIEWER_COMPLETION:-check-run}" in
     check-run)
-      [[ "$(reviewer_check_state "$sha")" == "completed" ]]
+      local run completed_at
+      run="$(reviewer_check_latest "$sha")"
+      [[ "$(jq -r '.status // "missing"' <<<"$run")" == "completed" ]] || return 1
+      # A run that completed BEFORE this cycle started is a previous attempt
+      # on the same SHA (typical right after `rereview --resolve-addressed`)
+      # — not this cycle's completion. ISO-8601 compares lexicographically.
+      if [[ -n "$since" ]]; then
+        completed_at="$(jq -r '.completed_at // ""' <<<"$run")"
+        [[ -n "$completed_at" && "$completed_at" > "$since" ]] || return 1
+      fi
+      return 0
       ;;
     bot-review)
       local n
@@ -106,8 +130,9 @@ reviewer_completed() {
 # bot-review providers (no check run) get the full timeout, not the grace.
 reviewer_wait() {
   local pr=$1 sha=$2 timeout=$3 since=${4:-}
-  local deadline=$(($(epoch) + timeout))
-  local grace_deadline=$(($(epoch) + 180))
+  local deadline grace_deadline
+  deadline=$(($(epoch) + timeout))
+  grace_deadline=$(($(epoch) + 180))
   ((grace_deadline > deadline)) && grace_deadline=$deadline
   local interval="${BMAD_PR_POLL_INTERVAL:-15}"
   local seen_signal=false state

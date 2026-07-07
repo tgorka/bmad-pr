@@ -145,12 +145,15 @@ build_body_file() { # key phase parent_pr run_id → prints temp file path
   printf '%s\n' "$f"
 }
 
-resolve_start_point() { # parent_branch → local ref, origin ref, or empty
+# Prefer the REMOTE parent tip: the GitHub PR base is the remote branch, so
+# branching from an ahead/stale local parent would leak unpublished parent
+# commits into the child and desync later retargets.
+resolve_start_point() { # parent_branch → origin ref, local ref, or empty
   local parent=$1
-  if git show-ref --verify -q "refs/heads/$parent"; then
-    printf '%s\n' "$parent"
-  elif git show-ref --verify -q "refs/remotes/origin/$parent"; then
+  if git show-ref --verify -q "refs/remotes/origin/$parent"; then
     printf 'origin/%s\n' "$parent"
+  elif git show-ref --verify -q "refs/heads/$parent"; then
+    printf '%s\n' "$parent"
   fi
 }
 
@@ -238,7 +241,11 @@ cmd_ship() {
   fi
 
   local title="BMAD: $KEY $OPT_PHASE"
-  local draft=true
+  local draft="${BMAD_PR_DRAFT:-true}"
+  case "$draft" in
+    true | false) ;;
+    *) refuse "BMAD_PR_DRAFT must be true or false (got: $draft)" ;;
+  esac
   [[ "$OPT_PUBLISH" == true ]] && draft=false
 
   if [[ "$OPT_DRY_RUN" == true ]]; then
@@ -478,11 +485,14 @@ cmd_watch() {
     exit "$EX_OK"
   fi
 
-  # Only reviews submitted after the last ship/amend count as this cycle's
-  # completion — without `since`, bot-review providers would match a stale
-  # review from a previous iteration and ingest old findings.
+  # Only reviewer activity after this cycle started counts as completion:
+  # the newest of last ship/amend and last re-review trigger. Without it,
+  # a stale review (bot-review mode) or an already-completed check run for
+  # the same SHA (right after rereview --resolve-addressed) would complete
+  # the wait instantly and ingest pre-trigger state.
   local since remaining reviewer_result
-  since="$(jq -r '.lastAmendedAt // empty' <<<"$ENTRY")"
+  since="$(jq -r '[.lastAmendedAt, .reviewer.lastTriggeredAt]
+                  | map(select(. != null)) | max // empty' <<<"$ENTRY")"
   remaining=$((deadline - $(epoch)))
   ((remaining < 30)) && remaining=30
   reviewer_result="$(reviewer_wait "$PR_NUMBER" "$head_sha" "$remaining" "$since")" || true
@@ -516,6 +526,12 @@ cmd_rereview() {
   cur="$(current_branch)"
   [[ "$cur" == "$ledger_branch" ]] ||
     refuse "story $KEY belongs to branch $ledger_branch but you are on $cur — switch branches first"
+
+  if [[ "$OPT_DRY_RUN" == true ]]; then
+    printf 'plan: resolve addressed threads=%s, push pending commits, comment "%s" on PR #%s\n' \
+      "$OPT_RESOLVE_ADDRESSED" "$BMAD_PR_REVIEWER_TRIGGER${OPT_COMMENT:+ $OPT_COMMENT}" "$PR_NUMBER"
+    return 0
+  fi
 
   local resolved=0
   if [[ "$OPT_RESOLVE_ADDRESSED" == true ]]; then
@@ -557,7 +573,9 @@ cmd_rereview() {
   fi
 
   reviewer_trigger "$PR_NUMBER" "$OPT_COMMENT"
-  ledger_update "$KEY" '.reviewer.lastReviewedSha = $sha' --arg sha "$head_sha"
+  ledger_update "$KEY" \
+    '.reviewer.lastReviewedSha = $sha | .reviewer.lastTriggeredAt = $now' \
+    --arg sha "$head_sha" --arg now "$(now_iso)"
   log "re-review triggered on PR #$PR_NUMBER: $BMAD_PR_REVIEWER_TRIGGER${OPT_COMMENT:+ $OPT_COMMENT}"
 }
 
@@ -572,6 +590,10 @@ cmd_retarget() {
 
   if [[ "$tool" == gt ]]; then
     require_cmd gt
+    if [[ "$OPT_DRY_RUN" == true ]]; then
+      printf 'plan: gt sync -f --delete-all --no-interactive && gt submit --no-interactive --no-edit\n'
+      return 0
+    fi
     gt_retarget
     log "stack synced via gt; ledger parent left as-is (gt owns stack metadata)"
     return 0
@@ -589,6 +611,14 @@ cmd_retarget() {
   [[ -n "$parent_sha" ]] ||
     refuse "ledger has no parentSha for $KEY — retarget manually: gh pr edit $PR_NUMBER --base <new-base> && git rebase --onto origin/<new-base> <old-parent-tip> $branch"
   new_base="$(jq -r '.baseRefName' <<<"$parent_state")"
+
+  # Everything above is read-only; the rebase + force-push + base edit below
+  # are the mutations the dry-run contract must never perform.
+  if [[ "$OPT_DRY_RUN" == true ]]; then
+    printf 'plan: rebase %s from %s onto origin/%s, push --force-with-lease, set PR #%s base to %s\n' \
+      "$branch" "${parent_sha:0:7}" "$new_base" "$PR_NUMBER" "$new_base"
+    return 0
+  fi
 
   gh_retarget "$PR_NUMBER" "$new_base" "$branch" "$parent_sha"
   ledger_update "$KEY" \

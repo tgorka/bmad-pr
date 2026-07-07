@@ -136,6 +136,33 @@ write_ledger() { # key branch parent_branch parent_pr number state openedAt
   [[ "$output" == *"belongs to branch bmad/story/3.2"* ]]
 }
 
+@test "ship honors BMAD_PR_DRAFT=false and validates the value" {
+  export BMAD_PR_DRAFT=false
+  run "$BMAD_PR_BIN" ship --story 3.2 --phase dev-story
+  [ "$status" -eq 0 ]
+  gh_called "pr create"
+  gh_not_called "--draft"
+  export BMAD_PR_DRAFT=maybe
+  run "$BMAD_PR_BIN" ship --story 3.3 --phase dev-story
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"BMAD_PR_DRAFT must be true or false"* ]]
+}
+
+@test "ship branches from the REMOTE parent tip, not an ahead local parent" {
+  git switch -qc bmad/story/3.1
+  git commit -q --allow-empty -m "published parent work"
+  git push -qu origin bmad/story/3.1
+  git commit -q --allow-empty -m "local-only parent work"
+  git switch -q main
+  write_ledger 3.1 bmad/story/3.1 "" "" 41 open 2026-07-01T10:00:00Z
+
+  run "$BMAD_PR_BIN" ship --story 3.2 --phase dev-story
+  [ "$status" -eq 0 ]
+  # story branch starts at origin's parent tip, excluding the local-only commit
+  [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/bmad/story/3.1)" ]
+  [ "$(git rev-parse HEAD)" != "$(git rev-parse bmad/story/3.1)" ]
+}
+
 @test "ship refuses when another ledger file is corrupt (no silent de-stack)" {
   mkdir -p "$REPO/_bmad-output/pr"
   echo '{broken' >"$REPO/_bmad-output/pr/zz.json"

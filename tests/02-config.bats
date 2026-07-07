@@ -92,6 +92,20 @@ setup() {
   [[ "$PATH" != /evil* ]]
 }
 
+@test "unknown BMAD_PR_* config keys warn and are ignored (typo guard)" {
+  mkdir -p "$ROOT/_bmad/bmad-pr"
+  printf 'BMAD_PR_REVIEWER_CHECK_REGX=oops\nBMAD_PR_TRUNK=develop\n' \
+    >"$ROOT/_bmad/bmad-pr/config.env"
+  run bash -c "
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/config.sh'
+    export LIB_SOURCE_DIR='$LIB_DIR'
+    config_load '$ROOT' && printf '%s\n' \"\$BMAD_PR_TRUNK\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unknown config key"* ]]
+  [[ "$output" == *"BMAD_PR_REVIEWER_CHECK_REGX"* ]]
+  [[ "$output" == *"develop"* ]]
+}
+
 @test "config file lines outside BMAD_PR_* are ignored with a warning" {
   mkdir -p "$ROOT/_bmad/bmad-pr"
   printf 'SOME_OTHER=1\nBMAD_PR_TRUNK=develop\n' >"$ROOT/_bmad/bmad-pr/config.env"
