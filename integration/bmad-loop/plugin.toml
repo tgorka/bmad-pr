@@ -1,0 +1,28 @@
+# bmad-pr as a bmad-loop orchestrator plugin.
+# Install as {project-root}/.bmad-loop/plugins/bmad-pr/plugin.toml.
+#
+# The workflow session runs at pre_commit_gate: it fires unconditionally
+# just before every commit (review, skip and budget-rescue paths alike) and
+# is defer-safe — the review phase has fully ended by then. Use
+# post_review_result instead if you only want it when the orchestrator's
+# review loop actually ran. Tune per-project via [plugins.bmad-pr] in
+# .bmad-loop/policy.toml (settings convention: bmad-pr_enabled,
+# bmad-pr_blocking).
+
+[plugin]
+name = "bmad-pr"
+api_version = 1
+
+[[settings]]
+name = "enabled"
+default = true
+
+[[settings]]
+name = "blocking"
+default = false
+
+[workflows.bmad-pr]
+stage = "pre_commit_gate"
+role = "dev"
+prompt = "Use the bmad-pr skill to ship story {story_key} as a stacked draft PR (phase dev-story), then the bmad-pr-loop skill to watch CI + the AI reviewer and address findings until green or the iteration ceiling. Report PR URL and verdict."
+blocking = false

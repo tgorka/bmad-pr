@@ -1,0 +1,15 @@
+{
+  "name": "bmad-pr",
+  "description": "bmad-pr marketplace — BMAD-style Claude Code plugin that stacks story PRs, watches CI and AI reviewers, and closes the review loop.",
+  "owner": {
+    "name": "Tomasz Gorka",
+    "url": "https://github.com/tgorka"
+  },
+  "plugins": [
+    {
+      "name": "bmad-pr",
+      "source": "./",
+      "description": "Stacked story PRs + CI/reviewer monitoring + BMAD-native findings ingestion and re-review cycle."
+    }
+  ]
+}

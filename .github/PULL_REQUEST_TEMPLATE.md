@@ -6,15 +6,11 @@
 
 <!-- Link any GitHub issues this PR addresses (e.g., "Closes #123"). -->
 
-## Changesets
-
-- [ ] Added a Changeset entry via `bun run changeset` describing this change (skip for docs-only or chore PRs).
-
 ## Quality Gates
 
-- [ ] `bun run check` exits 0 locally (Biome lint + tests pass).
-- [ ] `bunx tsc --noEmit` exits 0.
+- [ ] `scripts/check.sh` exits 0 locally (syntax, shellcheck, manifests, bats suite).
 - [ ] Tests added or updated for any behavior change.
+- [ ] `CHANGELOG.md` `## Unreleased` entry added for user-visible changes.
 
 ## BMAD Artifacts
 

@@ -1,0 +1,715 @@
+#!/usr/bin/env bash
+# bmad-pr — ship BMAD stories as stacked draft PRs, watch CI + AI reviewers,
+# ingest reviewer findings into BMAD review format, drive the re-review cycle.
+# Architecture: _bmad-output/planning-artifacts/architecture-plugin-rewrite.md
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_SOURCE_DIR="$SCRIPT_DIR/lib"
+export LIB_SOURCE_DIR
+
+# shellcheck source=lib/common.sh
+source "$LIB_SOURCE_DIR/common.sh"
+for _lib in config ledger preflight backend backend-gh backend-gt backend-git \
+  checks reviewer findings; do
+  # shellcheck source=/dev/null
+  source "$LIB_SOURCE_DIR/$_lib.sh"
+done
+
+VERSION="1.0.0"
+
+usage() {
+  cat <<'EOF'
+bmad-pr — stacked story PRs + CI/reviewer monitoring for BMAD projects
+
+Usage: bmad-pr <command> [options]
+
+Commands:
+  ship       Open or amend the draft PR for a story, stacked on the previous
+             story's open PR (gt native / gh emulated / bare-git fallback)
+  status     Show ledger + live PR, checks and reviewer state
+  watch      Wait for CI checks and the AI reviewer, then ingest findings
+  ingest     Convert unresolved reviewer threads + failing checks into a
+             BMAD-format findings file (_bmad-output/pr/<key>-findings.md)
+  rereview   Resolve addressed threads, push pending commits, re-trigger the
+             reviewer (default trigger: the configured re-review comment)
+  retarget   Repair the stack after the parent PR merged
+  preflight  Run the git-safety checks (CH1/CH2/CH3/CH5) standalone
+
+Options:
+  --story <key>         Story key (e.g. 3.2, quick-fix-login)
+  --phase <name>        BMAD phase (e.g. dev-story); required by ship
+  --base <branch>       Explicit stack parent (overrides ledger/auto resolution)
+  --run-id <id>         BMAD run id recorded in the PR body (ignored on amend)
+  --amend               Require an existing open ledger entry; refuse otherwise
+  --publish             Open the PR ready-for-review instead of draft
+  --tool <t>            auto|gt|gh|git (default: auto-detect)
+  --trunk <branch>      Trunk branch (default: main, or config)
+  --timeout <sec>       watch deadline (default: 1800, or config)
+  --resolve-addressed   rereview: resolve threads for [x] items in findings file
+  --comment <text>      rereview: extra context appended to the trigger comment
+  --force               rereview: trigger even for an already-reviewed SHA
+  --auto-fix            preflight/ship: bounded safe remediation (CH1/CH3/CH5)
+  --dry-run             Print the plan; zero side effects (never auto-fixes)
+  --json                Machine-readable output on stdout
+  --help, --version
+
+Exit codes:
+  0 success/green   1 unexpected failure   2 refusal (precondition)
+  3 reviewer findings to address   4 CI checks failed   5 timeout
+  6 reviewer absent/skipped
+EOF
+}
+
+OPT_STORY="" OPT_PHASE="" OPT_BASE="" OPT_RUN_ID="" OPT_TOOL="" OPT_TRUNK=""
+OPT_TIMEOUT="" OPT_COMMENT=""
+OPT_AMEND=false OPT_PUBLISH=false OPT_DRY_RUN=false OPT_AUTO_FIX=false
+OPT_JSON=false OPT_FORCE=false OPT_RESOLVE_ADDRESSED=false
+
+need_val() { [[ $# -ge 2 && -n "$2" ]] || refuse "$1 needs a value"; }
+
+parse_opts() {
+  while (($#)); do
+    case "$1" in
+      --story) need_val "$@"; OPT_STORY=$2; shift 2 ;;
+      --phase) need_val "$@"; OPT_PHASE=$2; shift 2 ;;
+      --base) need_val "$@"; OPT_BASE=$2; shift 2 ;;
+      --run-id) need_val "$@"; OPT_RUN_ID=$2; shift 2 ;;
+      --tool) need_val "$@"; OPT_TOOL=$2; shift 2 ;;
+      --trunk) need_val "$@"; OPT_TRUNK=$2; shift 2 ;;
+      --timeout) need_val "$@"; OPT_TIMEOUT=$2; shift 2 ;;
+      --comment) need_val "$@"; OPT_COMMENT=$2; shift 2 ;;
+      --amend) OPT_AMEND=true; shift ;;
+      --publish) OPT_PUBLISH=true; shift ;;
+      --dry-run) OPT_DRY_RUN=true; shift ;;
+      --auto-fix) OPT_AUTO_FIX=true; shift ;;
+      --json) OPT_JSON=true; shift ;;
+      --force) OPT_FORCE=true; shift ;;
+      --resolve-addressed) OPT_RESOLVE_ADDRESSED=true; shift ;;
+      --help | -h) usage; exit 0 ;;
+      *) refuse "unknown option: $1 (see --help)" ;;
+    esac
+  done
+}
+
+# Common per-command setup: repo root, config, flag overrides.
+setup() {
+  require_cmd git
+  require_cmd jq
+  ROOT="$(repo_root)"
+  cd "$ROOT"
+  config_load "$ROOT"
+  [[ -n "$OPT_TOOL" ]] && export BMAD_PR_TOOL=$OPT_TOOL
+  [[ -n "$OPT_TRUNK" ]] && export BMAD_PR_TRUNK=$OPT_TRUNK
+  [[ -n "$OPT_TIMEOUT" ]] && export BMAD_PR_TIMEOUT=$OPT_TIMEOUT
+  return 0
+}
+
+require_story() {
+  [[ -n "$OPT_STORY" ]] || refuse "--story is required for this command"
+  KEY="$(sanitize_key "$OPT_STORY")"
+  [[ -n "$KEY" ]] || refuse "invalid --story key"
+}
+
+# ledger_read runs in a command substitution, so its refusal on a malformed
+# ledger cannot abort us directly — distinguish rc 1 (absent) from rc>1
+# (refusal/error, already printed to stderr) and propagate the latter.
+require_entry() {
+  local rc=0
+  ENTRY="$(ledger_read "$KEY")" || rc=$?
+  ((rc > 1)) && exit "$rc"
+  ((rc == 1)) &&
+    refuse "no ledger entry for story $KEY — run: bmad-pr ship --story $KEY --phase <phase>"
+  PR_NUMBER="$(jq -r '.pr.number // empty' <<<"$ENTRY")"
+}
+
+require_pr_number() {
+  [[ -n "$PR_NUMBER" ]] ||
+    refuse "story $KEY has no recorded PR number (bare-git backend?) — this command needs gh"
+  require_cmd gh
+}
+
+# ── ship ─────────────────────────────────────────────────────────────────────
+
+build_body_file() { # key phase parent_pr run_id → prints temp file path
+  local key=$1 phase=$2 parent_pr=$3 run_id=$4 f artifact dir
+  # Repo-local temp (dot-prefixed so ledger globs never match it) — runtime
+  # writes stay inside the project, and nothing leaks to /tmp on failure.
+  dir="$(ledger_dir)" || exit "$EX_REFUSE"
+  mkdir -p "$dir"
+  f="$(mktemp "$dir/.pr-body.XXXXXX")"
+  artifact="_bmad-output/stories/$key.md"
+  [[ -f "$ROOT/$artifact" ]] || artifact="_bmad-output/"
+  {
+    printf 'BMAD slice for story %s, phase %s.\n\n' "$key" "$phase"
+    printf 'Artifact: %s\n' "$artifact"
+    [[ -n "$parent_pr" ]] && printf 'Stacked on: #%s\n' "$parent_pr"
+    printf '\nBMAD-Run-Id: %s\n' "$run_id"
+  } >"$f"
+  printf '%s\n' "$f"
+}
+
+# Prefer the REMOTE parent tip: the GitHub PR base is the remote branch, so
+# branching from an ahead/stale local parent would leak unpublished parent
+# commits into the child and desync later retargets.
+resolve_start_point() { # parent_branch → origin ref, local ref, or empty
+  local parent=$1
+  if git show-ref --verify -q "refs/remotes/origin/$parent"; then
+    printf 'origin/%s\n' "$parent"
+  elif git show-ref --verify -q "refs/heads/$parent"; then
+    printf '%s\n' "$parent"
+  fi
+}
+
+cmd_ship() {
+  require_story
+  [[ -n "$OPT_PHASE" ]] || refuse "--phase is required for ship"
+
+  local tool
+  tool="$(backend_detect)"
+  [[ "$tool" == gh || "$tool" == gt ]] && require_cmd "$tool"
+
+  preflight_run "$OPT_AUTO_FIX" "$OPT_DRY_RUN"
+
+  # Existing entry → amend path (never re-create; v0 decision D3/CH12).
+  # A malformed own ledger (rc>1) must stop for repair, not read as missing.
+  local entry="" amend_number="" run_id entry_rc=0
+  entry="$(ledger_read "$KEY")" || entry_rc=$?
+  ((entry_rc > 1)) && exit "$entry_rc"
+  if ((entry_rc == 0)); then
+    local state
+    state="$(jq -r '.pr.state' <<<"$entry")"
+    if [[ "$state" == open ]]; then
+      amend_number="$(jq -r '.pr.number // empty' <<<"$entry")"
+    else
+      refuse "story $KEY already has a $state PR ($(jq -r '.pr.url // "?"' <<<"$entry")) — remove $(ledger_path "$KEY") to open a new one"
+    fi
+    run_id="$(jq -r '.runId // empty' <<<"$entry")"
+  fi
+  [[ "$OPT_AMEND" == true && -z "$entry" ]] &&
+    refuse "--amend: no open ledger entry for story $KEY"
+  [[ -z "${run_id:-}" ]] && run_id="${OPT_RUN_ID:-$(date -u +%Y-%m-%dT%H-%M-%SZ)}"
+
+  # Stack-parent resolution (R5): --base > ledger > previous open story > trunk.
+  local parent_branch parent_pr=""
+  if [[ -n "$OPT_BASE" ]]; then
+    parent_branch=$OPT_BASE
+  elif [[ -n "$entry" ]]; then
+    parent_branch="$(jq -r '.parentBranch // empty' <<<"$entry")"
+    parent_pr="$(jq -r '.parentPr // empty' <<<"$entry")"
+    [[ -z "$parent_branch" ]] && parent_branch=$BMAD_PR_TRUNK
+  else
+    # rc 1 = genuinely no open parent → trunk. rc>1 = corrupt ledger state
+    # (refusal already printed) → propagate instead of silently de-stacking.
+    local prev prev_rc=0
+    prev="$(ledger_newest_open "$KEY")" || prev_rc=$?
+    if ((prev_rc == 0)); then
+      parent_branch="$(jq -r '.branch' <<<"$prev")"
+      parent_pr="$(jq -r '.pr.number // empty' <<<"$prev")"
+    elif ((prev_rc == 1)); then
+      parent_branch=$BMAD_PR_TRUNK
+    else
+      exit "$prev_rc"
+    fi
+  fi
+
+  # Branch policy (R5): ledger branch in place / create from trunk / bmad-* in
+  # place / refuse on unrelated branches.
+  local cur branch create_branch=false start_point=""
+  cur="$(current_branch)"
+  if [[ -n "$entry" ]]; then
+    branch="$(jq -r '.branch' <<<"$entry")"
+    [[ "$cur" == "$branch" ]] ||
+      refuse "story $KEY belongs to branch $branch but you are on $cur — switch branches first"
+  elif [[ "$cur" == "$BMAD_PR_TRUNK" ]]; then
+    branch="$BMAD_PR_BRANCH_PREFIX/story/$KEY"
+    create_branch=true
+    if [[ "$parent_branch" != "$BMAD_PR_TRUNK" ]]; then
+      start_point="$(resolve_start_point "$parent_branch")"
+      if [[ -z "$start_point" && "$OPT_DRY_RUN" != true ]]; then
+        # The parent may simply not be fetched yet — try before de-stacking.
+        git fetch origin "$parent_branch" >&2 2>/dev/null || true
+        start_point="$(resolve_start_point "$parent_branch")"
+      fi
+      [[ -z "$start_point" ]] && {
+        warn "stack parent $parent_branch not found locally or on origin — branching from $BMAD_PR_TRUNK"
+        parent_branch=$BMAD_PR_TRUNK
+        parent_pr=""
+      }
+    fi
+  elif [[ "$cur" == "$BMAD_PR_BRANCH_PREFIX/"* || "$cur" == bmad-pr/* ]]; then
+    branch=$cur # operate in place (includes CH1 auto-fix branches)
+  else
+    refuse "on unrelated branch '$cur' — switch to $BMAD_PR_TRUNK (a story branch will be created) or a $BMAD_PR_BRANCH_PREFIX/* branch"
+  fi
+
+  local parent_sha=""
+  if [[ "$parent_branch" != "$BMAD_PR_TRUNK" || -n "$parent_pr" ]]; then
+    parent_sha="$(git rev-parse -q --verify "refs/remotes/origin/$parent_branch" 2>/dev/null ||
+      git rev-parse -q --verify "refs/heads/$parent_branch" 2>/dev/null || true)"
+  fi
+
+  local title="BMAD: $KEY $OPT_PHASE"
+  local draft="${BMAD_PR_DRAFT:-true}"
+  case "$draft" in
+    true | false) ;;
+    *) refuse "BMAD_PR_DRAFT must be true or false (got: $draft)" ;;
+  esac
+  [[ "$OPT_PUBLISH" == true ]] && draft=false
+
+  if [[ "$OPT_DRY_RUN" == true ]]; then
+    {
+      printf 'plan: tool=%s\n' "$tool"
+      printf 'plan: branch=%s%s\n' "$branch" \
+        "$([[ "$create_branch" == true ]] && printf ' (create from %s)' "${start_point:-$BMAD_PR_TRUNK}")"
+      printf 'plan: base=%s%s\n' "$parent_branch" "${parent_pr:+ (stacked on PR #$parent_pr)}"
+      if [[ -n "$amend_number" ]]; then
+        printf 'plan: action=amend PR #%s (push + refresh body)\n' "$amend_number"
+      else
+        printf 'plan: action=create %s PR titled "%s"\n' \
+          "$([[ "$draft" == true ]] && echo draft || echo ready)" "$title"
+      fi
+      printf 'plan: ledger=%s\n' "$(ledger_path "$KEY")"
+    }
+    return 0
+  fi
+
+  if [[ "$create_branch" == true ]]; then
+    if [[ -n "$start_point" ]]; then
+      git switch -c "$branch" "$start_point" >&2
+    else
+      git switch -c "$branch" >&2
+    fi
+  fi
+
+  # Adopt an existing open PR for this branch that the ledger missed (CH12).
+  if [[ -z "$amend_number" && -z "$entry" ]] && backend_query_available; then
+    local adopted
+    adopted="$(gh_pr_open_number "$branch" || true)"
+    if [[ -n "$adopted" ]]; then
+      log "adopting existing open PR #$adopted for branch $branch"
+      amend_number=$adopted
+    fi
+  fi
+
+  local body_file result number url
+  body_file="$(build_body_file "$KEY" "$OPT_PHASE" "$parent_pr" "$run_id")"
+  # set -e exits straight past a plain rm on backend failure — the trap
+  # cleans up on every exit path. ${var:-} because the trap also fires
+  # after this function's locals are gone (set -u).
+  trap 'rm -f "${body_file:-}"' EXIT
+  result="$("${tool}_ship" "$branch" "$parent_branch" "$title" "$body_file" "$draft" "$amend_number")"
+  rm -f "$body_file"
+  number="${result%%$'\t'*}"
+  url="${result#*$'\t'}"
+
+  if [[ -n "$entry" ]]; then
+    ledger_update "$KEY" \
+      '.lastAmendedAt = $now
+       | .phase = $phase
+       | (if $number != "" then .pr.number = ($number | tonumber) | .pr.url = $url else . end)' \
+      --arg now "$(now_iso)" --arg phase "$OPT_PHASE" \
+      --arg number "$number" --arg url "$url"
+  else
+    ledger_new_entry "$KEY" "$branch" \
+      "$([[ "$parent_branch" == "$BMAD_PR_TRUNK" ]] && printf '' || printf '%s' "$parent_branch")" \
+      "$parent_sha" "$parent_pr" "$number" "$url" "$OPT_PHASE" "$run_id" "$tool" |
+      ledger_write "$KEY"
+  fi
+
+  if [[ "$OPT_JSON" == true ]]; then
+    ledger_read "$KEY"
+  elif [[ -n "$url" ]]; then
+    printf '%s\n' "$url"
+  else
+    log "branch pushed; no PR backend — see instructions above"
+  fi
+}
+
+# ── status / watch / ingest ─────────────────────────────────────────────────
+
+# Shared ingest: writes the findings file, updates reviewer state in the
+# ledger, and prints the machine verdict (green|findings|checks-failed) on
+# stdout via INGEST_VERDICT.
+do_ingest() {
+  local key=$1 pr=$2
+  local threads='[]' failing='[]' score="" approved=false head_sha="" snapshot
+
+  # Fail loud on fetch errors — ingesting "no findings" because an API call
+  # failed would green-light a PR nobody actually reviewed.
+  snapshot="$(checks_snapshot "$pr")"
+  [[ "$snapshot" != null ]] ||
+    die "could not fetch CI checks for PR #$pr (gh auth? network? rate limit?)"
+  failing="$(checks_failing <<<"$snapshot")"
+  # An empty head SHA would mean "any commit" to the score/approval filters
+  # below — fail loud instead of green-lighting stale reviewer output.
+  head_sha="$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null)" ||
+    die "could not fetch the head SHA of PR #$pr (gh auth? network? rate limit?)"
+  if [[ "${BMAD_PR_REVIEWER:-none}" != none ]]; then
+    backend_query_available ||
+      die "reviewer '$BMAD_PR_REVIEWER' is configured but gh is unavailable or unauthenticated — cannot ingest reviewer findings"
+    threads="$(reviewer_unresolved_threads "$pr")"
+    # Scope score and approval to the current head — reviewer output for an
+    # older revision must not green-light freshly pushed code.
+    score="$(reviewer_latest_score "$pr" "$head_sha")"
+    approved="$(reviewer_approved "$pr" "$head_sha")"
+  fi
+
+  local review_count=0
+  if [[ "${BMAD_PR_REVIEWER:-none}" != none ]]; then
+    review_count="$(reviewer_review_count "$pr" "$head_sha")"
+  fi
+
+  # A configured score contract (BMAD_PR_SCORE_REGEX) with a completed
+  # review that carries no score is a misconfiguration signal, not a green:
+  # the target repo is missing the contract (cubic: custom_instructions).
+  local score_missing=false
+  if [[ -n "${BMAD_PR_SCORE_REGEX:-}" && -z "$score" && "$approved" != true ]] &&
+    ((review_count > 0)); then
+    score_missing=true
+  fi
+
+  local out_dir
+  out_dir="$(ledger_dir)" || exit "$EX_REFUSE"
+  mkdir -p "$out_dir"
+  INGEST_FILE="$(findings_path "$key")" || exit "$EX_REFUSE"
+  findings_render "$key" "$pr" "$threads" "$failing" "$score" "$approved" \
+    "$score_missing" >"$INGEST_FILE"
+
+  # Record lastReviewedSha only when the reviewer actually produced output
+  # for this head — recording it on e.g. a CI-failed ingest would make the
+  # first rereview trigger skip as "already sent" (dedupe R12).
+  local reviewed_sha=""
+  if ((review_count > 0)) || [[ "$(jq 'length' <<<"$threads")" -gt 0 ]]; then
+    reviewed_sha="$head_sha"
+  fi
+  ledger_update "$key" \
+    '.reviewer.lastScore = (if $score == "" then null else ($score | tonumber) end)
+     | .reviewer.approved = ($approved == "true")
+     | (if $sha != "" then .reviewer.lastReviewedSha = $sha else . end)' \
+    --arg score "$score" --arg approved "$approved" --arg sha "$reviewed_sha"
+
+  INGEST_THREADS="$(jq 'length' <<<"$threads")"
+  INGEST_FAILING="$(jq 'length' <<<"$failing")"
+  INGEST_SCORE="$score"
+  INGEST_APPROVED="$approved"
+
+  INGEST_VERDICT=green
+  if ((INGEST_FAILING > 0)); then
+    INGEST_VERDICT=checks-failed
+  elif ((INGEST_THREADS > 0)); then
+    INGEST_VERDICT=findings
+  elif [[ "$approved" != true && -n "$score" ]] &&
+    ((score < ${BMAD_PR_SCORE_THRESHOLD:-8})); then
+    INGEST_VERDICT=findings
+  elif [[ "$score_missing" == true ]]; then
+    INGEST_VERDICT=findings
+  fi
+}
+
+ingest_report() {
+  local key=$1
+  if [[ "$OPT_JSON" == true ]]; then
+    jq -n --arg verdict "$INGEST_VERDICT" --arg score "$INGEST_SCORE" \
+      --arg file "$INGEST_FILE" \
+      --argjson threads "$INGEST_THREADS" --argjson failing "$INGEST_FAILING" \
+      --argjson approved "$([[ "$INGEST_APPROVED" == true ]] && echo true || echo false)" \
+      '{verdict: $verdict, unresolvedThreads: $threads, failingChecks: $failing,
+        score: (if $score == "" then null else ($score | tonumber) end),
+        approved: $approved, findingsFile: $file}'
+  else
+    log "verdict: $INGEST_VERDICT (threads: $INGEST_THREADS, failing checks: $INGEST_FAILING, score: ${INGEST_SCORE:-n/a})"
+    log "findings file: $INGEST_FILE"
+  fi
+}
+
+verdict_exit() {
+  case "$INGEST_VERDICT" in
+    green) exit "$EX_OK" ;;
+    findings) exit "$EX_FINDINGS" ;;
+    checks-failed) exit "$EX_CHECKS_FAILED" ;;
+  esac
+}
+
+cmd_ingest() {
+  require_story
+  require_entry
+  require_pr_number
+  do_ingest "$KEY" "$PR_NUMBER"
+  ingest_report "$KEY"
+  verdict_exit
+}
+
+cmd_status() {
+  require_story
+  require_entry
+  require_pr_number
+
+  local live checks_json checks_verdict threads score approved unresolved
+  live="$(gh_pr_state "$PR_NUMBER")"
+  checks_json="$(checks_snapshot "$PR_NUMBER")"
+  # An unfetchable checks state must not read as success.
+  [[ "$checks_json" != null ]] ||
+    die "could not fetch CI checks for PR #$PR_NUMBER (gh auth? network? rate limit?)"
+  checks_verdict="$(checks_aggregate <<<"$checks_json")"
+  threads='[]' score="" approved=false
+  if [[ "${BMAD_PR_REVIEWER:-none}" != none ]]; then
+    local live_head
+    live_head="$(jq -r '.headRefOid // ""' <<<"$live")"
+    threads="$(reviewer_unresolved_threads "$PR_NUMBER")"
+    score="$(reviewer_latest_score "$PR_NUMBER" "$live_head")"
+    approved="$(reviewer_approved "$PR_NUMBER" "$live_head")"
+  fi
+  unresolved="$(jq 'length' <<<"$threads")"
+
+  # Keep the ledger's PR state fresh (merged/closed detection).
+  local live_state
+  live_state="$(jq -r '.state | ascii_downcase' <<<"$live")"
+  [[ "$live_state" != "$(jq -r '.pr.state' <<<"$ENTRY")" ]] &&
+    ledger_update "$KEY" '.pr.state = $s' --arg s "$live_state"
+
+  if [[ "$OPT_JSON" == true ]]; then
+    jq -n --argjson entry "$(ledger_read "$KEY")" --argjson live "$live" \
+      --arg checks "$checks_verdict" --argjson failing "$(checks_failing <<<"$checks_json")" \
+      --arg score "$score" --argjson unresolved "$unresolved" \
+      --argjson approved "$([[ "$approved" == true ]] && echo true || echo false)" \
+      '{ledger: $entry, pr: $live,
+        checks: {verdict: $checks, failing: $failing},
+        reviewer: {provider: $entry.reviewer.provider, unresolvedThreads: $unresolved,
+                   score: (if $score == "" then null else ($score | tonumber) end),
+                   approved: $approved}}'
+  else
+    log "story $KEY — PR #$PR_NUMBER ($live_state) — checks: $checks_verdict — reviewer: score ${score:-n/a}, $unresolved unresolved thread(s), approved=$approved"
+  fi
+
+  [[ "$checks_verdict" == fail ]] && exit "$EX_CHECKS_FAILED"
+  ((unresolved > 0)) && exit "$EX_FINDINGS"
+  if [[ "$approved" != true && -n "$score" ]] &&
+    ((score < ${BMAD_PR_SCORE_THRESHOLD:-8})); then
+    exit "$EX_FINDINGS"
+  fi
+  # Same misconfiguration signal as ingest: reviews exist but none carries
+  # the configured score contract.
+  if [[ "${BMAD_PR_REVIEWER:-none}" != none && -n "${BMAD_PR_SCORE_REGEX:-}" &&
+    -z "$score" && "$approved" != true ]] &&
+    (($(reviewer_review_count "$PR_NUMBER" "$(jq -r '.headRefOid // ""' <<<"$live")") > 0)); then
+    exit "$EX_FINDINGS"
+  fi
+  exit "$EX_OK"
+}
+
+cmd_watch() {
+  require_story
+  require_entry
+  require_pr_number
+
+  local deadline timeout head_sha checks_result
+  timeout="${BMAD_PR_TIMEOUT:-1800}"
+  deadline=$(($(epoch) + timeout))
+  head_sha="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)"
+
+  log "watching PR #$PR_NUMBER (story $KEY, head ${head_sha:0:7}, timeout ${timeout}s)"
+
+  local checks_rc=0
+  checks_result="$(checks_wait "$PR_NUMBER" "$timeout")" || checks_rc=$?
+  if ((checks_rc != 0)); then
+    if [[ "$checks_result" == error ]]; then
+      die "could not fetch CI checks for PR #$PR_NUMBER (gh auth? network? rate limit?)"
+    fi
+    log "CI checks still pending at deadline"
+    exit "$EX_TIMEOUT"
+  fi
+  log "CI checks: $checks_result"
+  if [[ "$checks_result" == fail ]]; then
+    do_ingest "$KEY" "$PR_NUMBER"
+    ingest_report "$KEY"
+    exit "$EX_CHECKS_FAILED"
+  fi
+
+  if [[ "${BMAD_PR_REVIEWER:-none}" == none ]]; then
+    log "no reviewer configured — done"
+    exit "$EX_OK"
+  fi
+
+  # Only reviewer activity after this cycle started counts as completion:
+  # the newest of last ship/amend and last re-review trigger. Without it,
+  # a stale review (bot-review mode) or an already-completed check run for
+  # the same SHA (right after rereview --resolve-addressed) would complete
+  # the wait instantly and ingest pre-trigger state.
+  local since remaining reviewer_result
+  since="$(jq -r '[.lastAmendedAt, .reviewer.lastTriggeredAt]
+                  | map(select(. != null)) | max // empty' <<<"$ENTRY")"
+  remaining=$((deadline - $(epoch)))
+  ((remaining < 30)) && remaining=30
+  reviewer_result="$(reviewer_wait "$PR_NUMBER" "$head_sha" "$remaining" "$since")" || true
+  log "reviewer: $reviewer_result"
+  case "$reviewer_result" in
+    completed) ;;
+    absent) exit "$EX_NO_REVIEWER" ;;
+    timeout) exit "$EX_TIMEOUT" ;;
+    *) die "reviewer wait returned unexpected state: '${reviewer_result:-<empty>}'" ;;
+  esac
+
+  do_ingest "$KEY" "$PR_NUMBER"
+  ingest_report "$KEY"
+  verdict_exit
+}
+
+# ── rereview / retarget / preflight ─────────────────────────────────────────
+
+cmd_rereview() {
+  require_story
+  require_entry
+  require_pr_number
+  [[ "${BMAD_PR_REVIEWER:-none}" != none ]] ||
+    refuse "no reviewer configured (BMAD_PR_REVIEWER=none)"
+
+  # Same branch guard as ship: rereview pushes the CURRENT branch — from the
+  # wrong branch it would push unrelated commits and prod the reviewer
+  # without the intended fixes.
+  local ledger_branch cur
+  ledger_branch="$(jq -r '.branch' <<<"$ENTRY")"
+  cur="$(current_branch)"
+  [[ "$cur" == "$ledger_branch" ]] ||
+    refuse "story $KEY belongs to branch $ledger_branch but you are on $cur — switch branches first"
+
+  if [[ "$OPT_DRY_RUN" == true ]]; then
+    printf 'plan: resolve addressed threads=%s, push pending commits, comment "%s" on PR #%s\n' \
+      "$OPT_RESOLVE_ADDRESSED" "$BMAD_PR_REVIEWER_TRIGGER${OPT_COMMENT:+ $OPT_COMMENT}" "$PR_NUMBER"
+    return 0
+  fi
+
+  # Push pending local commits FIRST: resolving threads before a failed
+  # push would hide reviewer findings while the fixes never reached the PR.
+  if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    local unpushed
+    unpushed="$(git rev-list --count '@{u}..HEAD')"
+    if ((unpushed > 0)); then
+      log "pushing $unpushed unpushed commit(s)"
+      git push >&2
+    fi
+  fi
+
+  local resolved=0
+  if [[ "$OPT_RESOLVE_ADDRESSED" == true ]]; then
+    local -a ids=()
+    mapfile -t ids < <(findings_addressed_thread_ids "$KEY")
+    if ((${#ids[@]} > 0)); then
+      reviewer_resolve_threads "${ids[@]}"
+      resolved=${#ids[@]}
+      log "resolved $resolved addressed thread(s)"
+    else
+      log "no [x] findings with thread ids to resolve"
+    fi
+  fi
+
+  local head_sha last_sha state
+  head_sha="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)"
+  last_sha="$(jq -r '.reviewer.lastReviewedSha // empty' <<<"$ENTRY")"
+  state="$(reviewer_check_state "$head_sha")"
+
+  if [[ "$state" == queued || "$state" == in_progress ]]; then
+    log "a review is already running for ${head_sha:0:7} — not re-triggering"
+    exit "$EX_OK"
+  fi
+  # Dedupe (R12): same SHA, nothing resolved, no --force → provider would
+  # ignore the trigger anyway.
+  if [[ "$head_sha" == "$last_sha" && "$OPT_FORCE" == false ]] && ((resolved == 0)); then
+    log "HEAD ${head_sha:0:7} was already sent for review and nothing was resolved — use --force to trigger anyway"
+    exit "$EX_OK"
+  fi
+
+  reviewer_trigger "$PR_NUMBER" "$OPT_COMMENT"
+  ledger_update "$KEY" \
+    '.reviewer.lastReviewedSha = $sha | .reviewer.lastTriggeredAt = $now' \
+    --arg sha "$head_sha" --arg now "$(now_iso)"
+  log "re-review triggered on PR #$PR_NUMBER: $BMAD_PR_REVIEWER_TRIGGER${OPT_COMMENT:+ $OPT_COMMENT}"
+}
+
+cmd_retarget() {
+  require_story
+  require_entry
+
+  local tool branch
+  tool="$(jq -r '.tool // empty' <<<"$ENTRY")"
+  [[ -n "$tool" ]] || tool="$(backend_detect)"
+  branch="$(jq -r '.branch' <<<"$ENTRY")"
+
+  if [[ "$tool" == gt ]]; then
+    require_cmd gt
+    if [[ "$OPT_DRY_RUN" == true ]]; then
+      printf 'plan: gt sync -f --delete-all --no-interactive && gt submit --no-interactive --no-edit\n'
+      return 0
+    fi
+    gt_retarget
+    log "stack synced via gt; ledger parent left as-is (gt owns stack metadata)"
+    return 0
+  fi
+
+  require_pr_number
+  local parent_pr parent_sha parent_state new_base
+  parent_pr="$(jq -r '.parentPr // empty' <<<"$ENTRY")"
+  parent_sha="$(jq -r '.parentSha // empty' <<<"$ENTRY")"
+  [[ -n "$parent_pr" ]] ||
+    refuse "story $KEY has no recorded stack parent PR — nothing to retarget"
+  parent_state="$(gh pr view "$parent_pr" --json state,baseRefName)"
+  [[ "$(jq -r '.state' <<<"$parent_state")" == MERGED ]] ||
+    refuse "parent PR #$parent_pr is not merged (state: $(jq -r '.state' <<<"$parent_state"))"
+  [[ -n "$parent_sha" ]] ||
+    refuse "ledger has no parentSha for $KEY — retarget manually: gh pr edit $PR_NUMBER --base <new-base> && git rebase --onto origin/<new-base> <old-parent-tip> $branch"
+  new_base="$(jq -r '.baseRefName' <<<"$parent_state")"
+
+  # Everything above is read-only; the rebase + force-push + base edit below
+  # are the mutations the dry-run contract must never perform.
+  if [[ "$OPT_DRY_RUN" == true ]]; then
+    printf 'plan: rebase %s from %s onto origin/%s, push --force-with-lease, set PR #%s base to %s\n' \
+      "$branch" "${parent_sha:0:7}" "$new_base" "$PR_NUMBER" "$new_base"
+    return 0
+  fi
+
+  gh_retarget "$PR_NUMBER" "$new_base" "$branch" "$parent_sha"
+  ledger_update "$KEY" \
+    '.parentBranch = (if $base == $trunk then null else $base end)
+     | .parentPr = null
+     | .parentSha = (if $sha == "" then null else $sha end)' \
+    --arg base "$new_base" --arg trunk "$BMAD_PR_TRUNK" \
+    --arg sha "$(git rev-parse -q --verify "refs/remotes/origin/$new_base" 2>/dev/null || true)"
+  log "retargeted PR #$PR_NUMBER onto $new_base"
+}
+
+cmd_preflight() {
+  preflight_run "$OPT_AUTO_FIX" "$OPT_DRY_RUN"
+  if [[ "$OPT_JSON" == true ]]; then
+    printf '{"preflight": "ok"}\n'
+  else
+    log "preflight: ok"
+  fi
+}
+
+# ── main ─────────────────────────────────────────────────────────────────────
+
+main() {
+  (($#)) || {
+    usage
+    exit "$EX_REFUSE"
+  }
+  local cmd=$1
+  shift
+  case "$cmd" in
+    --help | -h | help)
+      usage
+      exit 0
+      ;;
+    --version)
+      printf 'bmad-pr %s\n' "$VERSION"
+      exit 0
+      ;;
+    ship | status | watch | ingest | rereview | retarget | preflight) ;;
+    *) refuse "unknown command: $cmd (see --help)" ;;
+  esac
+  parse_opts "$@"
+  setup
+  "cmd_$cmd"
+}
+
+main "$@"

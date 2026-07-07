@@ -12,13 +12,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+
+      - name: Cache vendored bats
+        uses: actions/cache@v4
         with:
-          bun-version: latest
+          path: tests/.vendor
+          key: bats-core-1.11.1
 
-      - name: Install dependencies (frozen lockfile)
-        run: bun install --frozen-lockfile
-
-      - name: Lint + test
-        run: bun run check
+      - name: Gate (lint + manifests + tests)
+        run: scripts/check.sh

@@ -1,48 +1,99 @@
 # bmad-pr
 
-A BMAD-method project. Planning, implementation, and test artifacts live under `_bmad-output/`; runtime tooling and code live at the repo root.
+A [BMAD](https://github.com/bmad-code-org/BMAD-METHOD)-style Claude Code
+plugin that closes the gap between BMAD review sessions and GitHub:
 
-## Requirements
+- **Ships** each story as a **draft PR stacked on the previous story's PR**
+  — natively via [Graphite](https://graphite.com) (`gt`), emulated via `gh`
+  (explicit `--base`/`--head`), or bare `git` as a last resort.
+- **Watches** pre-submit CI checks and external AI reviewers
+  ([cubic.dev](https://cubic.dev) built in; CodeRabbit/Greptile via the
+  `generic` provider).
+- **Ingests** reviewer findings into BMAD's review-findings format
+  (`- [ ] [Review][Patch] <title> [<file>:<line>]`) so the normal BMAD
+  address/defer/dismiss discipline applies.
+- **Closes the loop**: commits fixes, resolves the addressed review threads,
+  and re-triggers the reviewer (default comment: `@cubic-dev re-review`) —
+  deduped by SHA so bots aren't spammed.
+- **Places itself after reviews** in both the long BMAD methodology
+  (dev-auto HALT hook, bmad-loop `pre_commit_gate` plugin) and quick-dev
+  (`workflow.on_complete` override).
 
-- [Bun](https://bun.sh) >= 1.3
-- macOS or Linux (Windows via WSL)
+The previous TypeScript/Bun implementation is archived at tag
+[`v0-ts-cli`](https://github.com/tgorka/bmad-pr/releases/tag/v0-ts-cli).
 
-## Quick Start
+## Install
 
-```bash
-bun install --frozen-lockfile
-bun run check   # Biome lint + tests (release-blocker gate)
+As a Claude Code plugin (this repo is its own marketplace):
+
+```
+/plugin marketplace add tgorka/bmad-pr
+/plugin install bmad-pr@bmad-pr
 ```
 
-## Scripts
+Then, inside your BMAD project: run `/bmad-pr-setup` — it writes
+`_bmad/bmad-pr/config.env`, registers the module in `_bmad/config.yaml`,
+and installs the after-review hooks (quick-dev, dev-auto, bmad-loop).
 
-| Script              | What it does                                              |
-| ------------------- | --------------------------------------------------------- |
-| `bun run check`     | Biome lint (CI mode) + `bun test`. The CI gate.           |
-| `bun run lint`      | Biome lint without tests.                                 |
-| `bun run format`    | Biome auto-format (writes changes).                       |
-| `bun run test`      | Run the test suite (passes when no tests are present).    |
-| `bun run test:watch`| Run the suite in watch mode.                              |
-| `bun run changeset` | Create a Changeset entry describing a user-visible change.|
+Runtime requirements: `bash` ≥ 4, `git`, `jq`; `gh` (authenticated) for PR
+automation; `gt` optional for native stacking.
 
-## BMAD Workflow
+## Skills
 
-This project uses the [BMAD method](https://github.com/bmad-code-org/BMAD-METHOD) via the [bmad-stepper](https://github.com/tgorka/bmad-stepper) plugin for Claude Code. Run `/bmad-next` to advance one step at a time, or `/bmad-loop` to iterate. Generated artifacts under `_bmad-output/` are tracked in git (planning + implementation specs are the source of truth); runtime caches under `_bmad-output/.stepper/`, `.archive/`, `.runs/` are gitignored.
+| Skill | What it does |
+| ----- | ------------- |
+| `/bmad-pr` | Derive story/phase from BMAD state and ship (open/amend) the stacked draft PR |
+| `/bmad-pr-loop` | Watch CI + reviewer → ingest findings → address → push → re-review, until green |
+| `/bmad-pr-setup` | Register the module and place it after review sessions |
 
-## /bmad-pr — Claude Code Skill
+## CLI
 
-Two surfaces are shipped:
+Skills dispatch to a deterministic CLI you can also run directly:
 
-- **CLI** — `bun src/cli/bmad-pr.ts --story <e>.<s> --phase <name>` opens or amends a draft PR via `gh` and records the URL in `_bmad-output/stories/<e>.<s>.md`. Run `--help` for the full flag list. Deterministic, fully tested.
-- **Skill** — `/bmad-pr` slash-command in Claude Code, defined at `.claude/skills/bmad-pr/SKILL.md`. Auto-loaded for Claude Code sessions inside this repo. The skill derives `--story` and `--phase` from BMAD state, then dispatches to the CLI and surfaces the result.
+```bash
+scripts/bmad-pr ship     --story 3.2 --phase dev-story [--dry-run] [--auto-fix]
+scripts/bmad-pr watch    --story 3.2 [--timeout 1800]
+scripts/bmad-pr ingest   --story 3.2 [--json]
+scripts/bmad-pr rereview --story 3.2 --resolve-addressed
+scripts/bmad-pr retarget --story 3.2      # after the parent PR merged
+scripts/bmad-pr status   --story 3.2 --json
+scripts/bmad-pr preflight [--auto-fix] [--dry-run]
+```
 
-## Style Checker
+Exit codes: `0` success/green, `1` unexpected failure, `2` refusal
+(precondition; message explains), `3` reviewer findings to address,
+`4` CI checks failed, `5` timeout, `6` reviewer absent/skipped.
 
-Biome 2.4 enforces formatting (2-space indent, double quotes, semicolons) and lint rules (`noConsole`, `noUnusedVariables`, `noImplicitAnyLet`, `useExhaustiveDependencies`). The `_bmad-output/`, `_bmad/`, and build output directories are excluded from linting — see `biome.json`.
+State lives in a per-story JSON ledger under `_bmad-output/pr/` (committed),
+findings in `_bmad-output/pr/<key>-findings.md`.
 
-## Contributing
+### Git safety (preflight)
 
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the development setup, PR flow, and code-style conventions. The [`AGENTS.md`](./AGENTS.md) file is the contract for AI coding agents working in this repo.
+Ported from v0: CH1 detached HEAD, CH2 mid-rebase/merge (refuses hard),
+CH3 unstaged changes outside `_bmad-output/`, CH5 remote ahead of local.
+`--auto-fix` performs only bounded remediation (branch from HEAD, stage
+BMAD paths, `pull --rebase`); `--dry-run` never mutates anything.
+
+## Configuration
+
+`_bmad/bmad-pr/config.env` (flat `KEY=value`; env vars override the file,
+flags override env). See
+[`integration/config.env.example`](integration/config.env.example) for all
+keys: backend selection, trunk, reviewer provider/trigger/score threshold,
+timeouts. Reviewer providers are config profiles — integrating another
+bot is configuration, not code.
+
+## Development
+
+```bash
+scripts/check.sh   # the gate: bash -n, shellcheck, manifest checks, bats suite
+tests/run.sh       # just the tests (vendors a pinned bats-core on first run)
+git config core.hooksPath .githooks   # pre-commit = the same gate
+```
+
+BMAD planning artifacts for this rewrite (research, architecture spine,
+epics) live under
+[`_bmad-output/planning-artifacts/`](_bmad-output/planning-artifacts/).
 
 ## License
 

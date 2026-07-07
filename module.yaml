@@ -1,0 +1,26 @@
+# BMAD module identity — consumed by /bmad-pr-setup when registering the module
+# into a project's _bmad/config.yaml (same pattern as bmad-loop's module.yaml).
+code: bmad-pr
+name: BMAD PR
+module_version: 1.0.0
+default_selected: true
+module_greeting: >
+  bmad-pr ships each story as a draft PR stacked on the previous story's PR,
+  watches CI and AI reviewers (cubic.dev by default), and feeds reviewer findings
+  back into the BMAD review cycle.
+variables:
+  - key: pr_tool
+    prompt: "PR backend (auto = detect gt, then gh, then bare git)"
+    default: auto
+  - key: trunk_branch
+    prompt: "Trunk branch PRs ultimately target"
+    default: main
+  - key: reviewer_provider
+    prompt: "AI reviewer provider (cubic | generic | none)"
+    default: cubic
+  - key: reviewer_trigger
+    prompt: "Comment that re-triggers the reviewer on a PR"
+    default: "@cubic-dev re-review"
+  - key: score_threshold
+    prompt: "Minimum reviewer score (N/10) considered green"
+    default: "8"
