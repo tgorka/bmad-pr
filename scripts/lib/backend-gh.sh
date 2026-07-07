@@ -3,11 +3,18 @@
 # against gh 2.95). Also the shared GitHub query surface (PR state, comments).
 
 # Number of the open PR whose head is <branch>, or empty.
-# (gh pr view alone would also resolve merged/closed PRs — don't use it here.)
-# --repo pins the base repo so fork workflows don't query the fork.
+# REST with an owner-qualified head filter: `gh pr list --head` matches the
+# branch NAME only, which in fork workflows could adopt another
+# contributor's same-named branch. (gh pr view alone would also resolve
+# merged/closed PRs — don't use it here.)
 gh_pr_open_number() {
-  gh pr list --repo "$(repo_slug)" --head "$1" --state open \
-    --json number --jq '.[0].number // empty'
+  local branch=$1 base_slug head_owner
+  base_slug="$(repo_slug)"
+  head_owner="$(remote_slug "${BMAD_PR_REMOTE:-origin}" 2>/dev/null || true)"
+  head_owner="${head_owner%%/*}"
+  [[ -n "$head_owner" ]] || head_owner="${base_slug%%/*}"
+  gh api "repos/$base_slug/pulls?head=$head_owner:$branch&state=open" \
+    --jq '.[0].number // empty'
 }
 
 # Head SHA of a PR (base-repo scoped).

@@ -153,6 +153,26 @@ EOF
   gh_called "pr edit 42" "--repo up/base" "--base main"
 }
 
+@test "fork flow: PR adoption queries the base repo with owner-qualified head" {
+  make_stub git <<'EOF'
+case "$*" in
+  "remote get-url upstream") echo "https://github.com/up/base.git" ;;
+  "remote get-url origin") echo "git@github.com:me/base.git" ;;
+  *) exit 0 ;;
+esac
+EOF
+  export GH_STUB_OPEN_PR=88
+  run bash -c "
+    export PATH='$STUB_DIR:$PATH' LIB_SOURCE_DIR='$LIB_DIR'
+    export BMAD_PR_REMOTE=origin
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/reviewer.sh'
+    source '$LIB_DIR/backend-gh.sh'
+    gh_pr_open_number bmad/story/9.9"
+  [ "$status" -eq 0 ]
+  [ "$output" = "88" ]
+  gh_called "repos/up/base/pulls?head=me:bmad/story/9.9"
+}
+
 @test "fork flow: amend edits the PR in the base repo" {
   make_stub git <<'EOF'
 case "$*" in
