@@ -40,6 +40,8 @@ Options:
   --story <key>         Story key (e.g. 3.2, quick-fix-login)
   --phase <name>        BMAD phase (e.g. dev-story); required by ship
   --base <branch>       Explicit stack parent (overrides ledger/auto resolution)
+  --planning            ship: planning-phase PR — branch <prefix>/planning/<phase>;
+                        ledger key defaults to planning-<phase> when --story omitted
   --run-id <id>         BMAD run id recorded in the PR body (ignored on amend)
   --amend               Require an existing open ledger entry; refuse otherwise
   --publish             Open the PR ready-for-review instead of draft
@@ -64,7 +66,7 @@ EOF
 OPT_STORY="" OPT_PHASE="" OPT_BASE="" OPT_RUN_ID="" OPT_TOOL="" OPT_TRUNK=""
 OPT_TIMEOUT="" OPT_COMMENT=""
 OPT_AMEND=false OPT_PUBLISH=false OPT_DRY_RUN=false OPT_AUTO_FIX=false
-OPT_JSON=false OPT_FORCE=false OPT_RESOLVE_ADDRESSED=false
+OPT_JSON=false OPT_FORCE=false OPT_RESOLVE_ADDRESSED=false OPT_PLANNING=false
 
 need_val() { [[ $# -ge 2 && -n "$2" ]] || refuse "$1 needs a value"; }
 
@@ -79,6 +81,7 @@ parse_opts() {
       --trunk) need_val "$@"; OPT_TRUNK=$2; shift 2 ;;
       --timeout) need_val "$@"; OPT_TIMEOUT=$2; shift 2 ;;
       --comment) need_val "$@"; OPT_COMMENT=$2; shift 2 ;;
+      --planning) OPT_PLANNING=true; shift ;;
       --amend) OPT_AMEND=true; shift ;;
       --publish) OPT_PUBLISH=true; shift ;;
       --dry-run) OPT_DRY_RUN=true; shift ;;
@@ -140,30 +143,84 @@ build_body_file() { # key phase parent_pr run_id → prints temp file path
   f="$(mktemp "$dir/.pr-body.XXXXXX")"
   artifact="_bmad-output/stories/$key.md"
   [[ -f "$ROOT/$artifact" ]] || artifact="_bmad-output/"
-  {
-    printf 'BMAD slice for story %s, phase %s.\n\n' "$key" "$phase"
-    printf 'Artifact: %s\n' "$artifact"
-    [[ -n "$parent_pr" ]] && printf 'Stacked on: #%s\n' "$parent_pr"
-    printf '\nBMAD-Run-Id: %s\n' "$run_id"
-  } >"$f"
+
+  local template="$ROOT/${BMAD_PR_TEMPLATE:-.github/bmad-pr-template.md}"
+  if [[ -f "$template" ]]; then
+    # DW-1: literal placeholder substitution — the template is data, never
+    # shell-evaluated. Unknown placeholders pass through untouched.
+    local body
+    body="$(<"$template")"
+    body="${body//\{\{story\}\}/$key}"
+    body="${body//\{\{phase\}\}/$phase}"
+    body="${body//\{\{artifact\}\}/$artifact}"
+    body="${body//\{\{parent_pr\}\}/${parent_pr:-none}}"
+    body="${body//\{\{run_id\}\}/$run_id}"
+    body="${body//\{\{timestamp\}\}/$(now_iso)}"
+    printf '%s\n' "$body" >"$f"
+  else
+    {
+      printf 'BMAD slice for story %s, phase %s.\n\n' "$key" "$phase"
+      printf 'Artifact: %s\n' "$artifact"
+      [[ -n "$parent_pr" ]] && printf 'Stacked on: #%s\n' "$parent_pr"
+      printf '\nBMAD-Run-Id: %s\n' "$run_id"
+    } >"$f"
+  fi
   printf '%s\n' "$f"
+}
+
+phase_emoji() {
+  case "$1" in
+    dev* | quick-dev) printf '💻' ;;
+    create-story | stories | story*) printf '📝' ;;
+    brainstorm*) printf '🧠' ;;
+    prd) printf '📋' ;;
+    arch*) printf '🏗️' ;;
+    ux) printf '🎨' ;;
+    *review*) printf '🔍' ;;
+    retro*) printf '🔁' ;;
+    *) : ;;
+  esac
+}
+
+# Assumes BMAD_PR_TITLE_FORMAT was validated by the caller (refusals do not
+# propagate out of command substitutions).
+build_title() { # key phase → title
+  local key=$1 phase=$2 title emoji
+  if [[ "${BMAD_PR_TITLE_FORMAT:-bmad}" == conventional ]]; then
+    title="feat(story-$key): $phase"
+  else
+    title="BMAD: $key $phase"
+  fi
+  if [[ "${BMAD_PR_TITLE_EMOJI:-false}" == true ]]; then
+    emoji="$(phase_emoji "$phase")"
+    [[ -n "$emoji" ]] && title="$emoji $title"
+  fi
+  printf '%s\n' "$title"
 }
 
 # Prefer the REMOTE parent tip: the GitHub PR base is the remote branch, so
 # branching from an ahead/stale local parent would leak unpublished parent
 # commits into the child and desync later retargets.
-resolve_start_point() { # parent_branch → origin ref, local ref, or empty
-  local parent=$1
-  if git show-ref --verify -q "refs/remotes/origin/$parent"; then
-    printf 'origin/%s\n' "$parent"
+resolve_start_point() { # parent_branch → remote ref, local ref, or empty
+  local parent=$1 remote="${BMAD_PR_REMOTE:-origin}"
+  if git show-ref --verify -q "refs/remotes/$remote/$parent"; then
+    printf '%s/%s\n' "$remote" "$parent"
   elif git show-ref --verify -q "refs/heads/$parent"; then
     printf '%s\n' "$parent"
   fi
 }
 
 cmd_ship() {
-  require_story
   [[ -n "$OPT_PHASE" ]] || refuse "--phase is required for ship"
+  # DW-2: planning phases default their ledger key from the phase name.
+  if [[ "$OPT_PLANNING" == true && -z "$OPT_STORY" ]]; then
+    OPT_STORY="planning-$(sanitize_key "$OPT_PHASE")"
+  fi
+  require_story
+  case "${BMAD_PR_TITLE_FORMAT:-bmad}" in
+    bmad | conventional) ;;
+    *) refuse "BMAD_PR_TITLE_FORMAT must be bmad or conventional (got: $BMAD_PR_TITLE_FORMAT)" ;;
+  esac
 
   local tool
   tool="$(backend_detect)"
@@ -222,13 +279,17 @@ cmd_ship() {
     [[ "$cur" == "$branch" ]] ||
       refuse "story $KEY belongs to branch $branch but you are on $cur — switch branches first"
   elif [[ "$cur" == "$BMAD_PR_TRUNK" ]]; then
-    branch="$BMAD_PR_BRANCH_PREFIX/story/$KEY"
+    if [[ "$OPT_PLANNING" == true ]]; then
+      branch="$BMAD_PR_BRANCH_PREFIX/planning/$(sanitize_key "$OPT_PHASE")"
+    else
+      branch="$BMAD_PR_BRANCH_PREFIX/story/$KEY"
+    fi
     create_branch=true
     if [[ "$parent_branch" != "$BMAD_PR_TRUNK" ]]; then
       start_point="$(resolve_start_point "$parent_branch")"
       if [[ -z "$start_point" && "$OPT_DRY_RUN" != true ]]; then
         # The parent may simply not be fetched yet — try before de-stacking.
-        git fetch origin "$parent_branch" >&2 2>/dev/null || true
+        git fetch "$BMAD_PR_REMOTE" "$parent_branch" >&2 2>/dev/null || true
         start_point="$(resolve_start_point "$parent_branch")"
       fi
       [[ -z "$start_point" ]] && {
@@ -245,11 +306,12 @@ cmd_ship() {
 
   local parent_sha=""
   if [[ "$parent_branch" != "$BMAD_PR_TRUNK" || -n "$parent_pr" ]]; then
-    parent_sha="$(git rev-parse -q --verify "refs/remotes/origin/$parent_branch" 2>/dev/null ||
+    parent_sha="$(git rev-parse -q --verify "refs/remotes/$BMAD_PR_REMOTE/$parent_branch" 2>/dev/null ||
       git rev-parse -q --verify "refs/heads/$parent_branch" 2>/dev/null || true)"
   fi
 
-  local title="BMAD: $KEY $OPT_PHASE"
+  local title
+  title="$(build_title "$KEY" "$OPT_PHASE")"
   local draft="${BMAD_PR_DRAFT:-true}"
   case "$draft" in
     true | false) ;;
@@ -673,7 +735,7 @@ cmd_retarget() {
      | .parentPr = null
      | .parentSha = (if $sha == "" then null else $sha end)' \
     --arg base "$new_base" --arg trunk "$BMAD_PR_TRUNK" \
-    --arg sha "$(git rev-parse -q --verify "refs/remotes/origin/$new_base" 2>/dev/null || true)"
+    --arg sha "$(git rev-parse -q --verify "refs/remotes/$BMAD_PR_REMOTE/$new_base" 2>/dev/null || true)"
   log "retargeted PR #$PR_NUMBER onto $new_base"
 }
 
@@ -712,4 +774,7 @@ main() {
   "cmd_$cmd"
 }
 
-main "$@"
+# Sourceable for unit tests: run main only when executed directly.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

@@ -44,17 +44,26 @@ preflight_ch1() {
 }
 
 preflight_ch1_fix() {
-  git switch -c "bmad-pr/$(git rev-parse --short HEAD)-$(epoch)"
+  # epoch + PID: two invocations in the same second cannot collide (DW-9).
+  git switch -c "bmad-pr/$(git rev-parse --short HEAD)-$(epoch)-$$"
 }
 
-# CH2 — mid-rebase / mid-merge. Refuse hard; never auto-fix.
+# CH2 — mid-rebase / mid-merge. Refuse hard; never auto-fix. In a
+# gt-initialized repo the rebase in flight is usually a gt restack (CH4) —
+# the hint points at gt, whose metadata a raw `git rebase --continue`
+# could desync.
 preflight_ch2() {
   PREFLIGHT_MSG='' PREFLIGHT_FIX_HINT='' PREFLIGHT_FIX_DESC='' PREFLIGHT_FIX_FN=''
   local git_dir
   git_dir="$(git rev-parse --git-dir)"
   if [[ -d "$git_dir/rebase-merge" || -d "$git_dir/rebase-apply" ]]; then
     PREFLIGHT_MSG="rebase in progress"
-    PREFLIGHT_FIX_HINT="Run: git rebase --continue (or --abort), then retry."
+    if [[ -f "$(git rev-parse --git-common-dir)/.graphite_repo_config" ]]; then
+      PREFLIGHT_MSG="rebase in progress (gt restack?)"
+      PREFLIGHT_FIX_HINT="Run: gt continue (or gt rebase --abort), then retry."
+    else
+      PREFLIGHT_FIX_HINT="Run: git rebase --continue (or --abort), then retry."
+    fi
     return 1
   fi
   if [[ -f "$git_dir/MERGE_HEAD" ]]; then
@@ -101,7 +110,13 @@ preflight_ch3_fix() {
   local scope="${BMAD_PR_STAGE_GLOB:-_bmad-output/}"
   # Guard: git add errors on a pathspec that matches nothing.
   if [[ -e "$(repo_root)/$scope" ]]; then
-    git add -- "$scope"
+    # DW-8: `tracked` stages only modifications to tracked files (-u);
+    # `all` (default) also picks up new artifacts under the scope.
+    if [[ "${BMAD_PR_STAGE_MODE:-all}" == tracked ]]; then
+      git add -u -- "$scope"
+    else
+      git add -- "$scope"
+    fi
   fi
 }
 

@@ -12,7 +12,8 @@ gh_pr_open_number() {
 # Prints "<number>\t<url>".
 gh_ship() {
   local branch=$1 parent=$2 title=$3 body_file=$4 draft=$5 amend_number=$6
-  git push -u origin "$branch" >&2 || die "git push failed for $branch"
+  local remote="${BMAD_PR_REMOTE:-origin}"
+  git push -u "$remote" "$branch" >&2 || die "git push failed for $branch"
 
   if [[ -n "$amend_number" ]]; then
     # Keep the title (carries the phase) AND the base in sync — an adopted
@@ -27,9 +28,34 @@ gh_ship() {
     return 0
   fi
 
-  local -a args=(pr create --base "$parent" --head "$branch"
+  local -a args=(pr create --base "$parent"
     --title "$title" --body-file "$body_file")
   [[ "$draft" == true ]] && args+=(--draft)
+
+  # DW-3 fork flow: when the push remote is a fork of the base repo
+  # (an `upstream` remote resolves repo_slug), target the base repo with a
+  # fork-qualified head.
+  local head_ref="$branch" push_slug base_slug
+  base_slug="$(repo_slug)"
+  push_slug="$(remote_slug "$remote" 2>/dev/null || true)"
+  if [[ -n "$push_slug" && -n "$base_slug" && "$push_slug" != "$base_slug" ]]; then
+    args+=(--repo "$base_slug")
+    head_ref="${push_slug%%/*}:$branch"
+  fi
+  args+=(--head "$head_ref")
+
+  # DW-1: labels on creation only; amend leaves labels alone.
+  if [[ -n "${BMAD_PR_LABELS:-}" ]]; then
+    local -a labels=()
+    IFS=',' read -r -a labels <<<"$BMAD_PR_LABELS"
+    local label
+    for label in "${labels[@]}"; do
+      label="${label#"${label%%[![:space:]]*}"}"
+      label="${label%"${label##*[![:space:]]}"}"
+      [[ -n "$label" ]] && args+=(--label "$label")
+    done
+  fi
+
   local url
   url="$(gh "${args[@]}" | tail -n1)"
   [[ "$url" == *"/pull/"* ]] || die "gh pr create returned no PR URL (got: $url)"
@@ -52,12 +78,13 @@ gh_pr_comment() {
 # only force-push in the tool.
 gh_retarget() {
   local number=$1 new_base=$2 branch=$3 old_parent_sha=$4
-  git fetch origin >&2
-  git rebase --onto "origin/$new_base" "$old_parent_sha" "$branch" >&2 || {
+  local remote="${BMAD_PR_REMOTE:-origin}"
+  git fetch "$remote" >&2
+  git rebase --onto "$remote/$new_base" "$old_parent_sha" "$branch" >&2 || {
     git rebase --abort >&2 || true
-    refuse "rebase onto origin/$new_base hit conflicts; resolve manually (git rebase --onto origin/$new_base $old_parent_sha $branch), then re-run retarget"
+    refuse "rebase onto $remote/$new_base hit conflicts; resolve manually (git rebase --onto $remote/$new_base $old_parent_sha $branch), then re-run retarget"
   }
-  git push --force-with-lease origin "$branch" >&2 ||
+  git push --force-with-lease "$remote" "$branch" >&2 ||
     die "git push --force-with-lease failed after retarget"
   gh pr edit "$number" --base "$new_base" >/dev/null ||
     die "gh pr edit --base $new_base failed (branch already rebased and pushed; re-run retarget)"

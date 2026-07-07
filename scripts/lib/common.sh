@@ -48,3 +48,28 @@ sanitize_key() {
   local key=$1
   printf '%s' "${key//[^A-Za-z0-9._-]/-}"
 }
+
+# remote_slug <remote> → owner/repo parsed from the remote URL (rc 1 when
+# the remote is absent or the URL is not a forge-style URL).
+remote_slug() {
+  local url
+  url="$(git remote get-url "$1" 2>/dev/null)" || return 1
+  url="${url%.git}"
+  case "$url" in
+    git@*:*)
+      url="${url#git@}"
+      url="${url#*:}"
+      ;;
+    ssh://git@*)
+      url="${url#ssh://git@}"
+      url="${url#*/}"
+      ;;
+    http://* | https://*)
+      url="${url#*://}"
+      url="${url#*/}"
+      ;;
+    *) return 1 ;;
+  esac
+  [[ "$url" == */* ]] || return 1
+  printf '%s\n' "$url"
+}

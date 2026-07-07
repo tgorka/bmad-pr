@@ -8,10 +8,18 @@
 # results are piped through real jq. REST/GraphQL pagination emits one JSON
 # document per page — always merge with `jq -s`.
 
+# Base repo for all GitHub queries. With an `upstream` remote (fork
+# workflow, DW-3) the base is upstream; otherwise gh resolves it from the
+# working directory.
 repo_slug() {
   if [[ -z "${_BMAD_PR_REPO_SLUG:-}" ]]; then
-    _BMAD_PR_REPO_SLUG="$(gh repo view --json owner,name \
-      --jq '"\(.owner.login)/\(.name)"')" || die "gh repo view failed"
+    if git remote get-url upstream >/dev/null 2>&1; then
+      _BMAD_PR_REPO_SLUG="$(remote_slug upstream)" ||
+        die "cannot parse the upstream remote URL into owner/repo"
+    else
+      _BMAD_PR_REPO_SLUG="$(gh repo view --json owner,name \
+        --jq '"\(.owner.login)/\(.name)"')" || die "gh repo view failed"
+    fi
   fi
   printf '%s\n' "$_BMAD_PR_REPO_SLUG"
 }
