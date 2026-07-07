@@ -51,6 +51,9 @@ set_reviewed() { # sha
   run "$BMAD_PR_BIN" watch --story 3.2
   [ "$status" -eq 4 ]
   grep -q 'CI check failing: test' "$REPO/_bmad-output/pr/3.2-findings.md"
+  # no reviewer output existed → lastReviewedSha must stay null so the
+  # first rereview trigger isn't deduped away
+  [ "$(jq -r '.reviewer.lastReviewedSha' "$REPO/_bmad-output/pr/3.2.json")" = "null" ]
 }
 
 @test "watch: unresolved reviewer threads → exit 3" {

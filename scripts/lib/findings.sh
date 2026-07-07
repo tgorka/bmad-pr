@@ -35,7 +35,7 @@ Mark addressed items \`[x]\`, then run:
 
 ## Summary
 
-- Reviewer score: ${score:-n/a}${score:+/10} (threshold: ${BMAD_PR_SCORE_THRESHOLD:-n/a})
+- Reviewer score: ${score:-n/a}${score:+/10} (threshold: ${BMAD_PR_SCORE_THRESHOLD:-8})
 - Reviewer approved: $approved
 - Unresolved reviewer threads: $n_threads
 - Failing CI checks: $n_checks

@@ -132,8 +132,12 @@ require_pr_number() {
 # ── ship ─────────────────────────────────────────────────────────────────────
 
 build_body_file() { # key phase parent_pr run_id → prints temp file path
-  local key=$1 phase=$2 parent_pr=$3 run_id=$4 f artifact
-  f="$(mktemp "${TMPDIR:-/tmp}/bmad-pr-body.XXXXXX")"
+  local key=$1 phase=$2 parent_pr=$3 run_id=$4 f artifact dir
+  # Repo-local temp (dot-prefixed so ledger globs never match it) — runtime
+  # writes stay inside the project, and nothing leaks to /tmp on failure.
+  dir="$(ledger_dir)" || exit "$EX_REFUSE"
+  mkdir -p "$dir"
+  f="$(mktemp "$dir/.pr-body.XXXXXX")"
   artifact="_bmad-output/stories/$key.md"
   [[ -f "$ROOT/$artifact" ]] || artifact="_bmad-output/"
   {
@@ -222,6 +226,11 @@ cmd_ship() {
     create_branch=true
     if [[ "$parent_branch" != "$BMAD_PR_TRUNK" ]]; then
       start_point="$(resolve_start_point "$parent_branch")"
+      if [[ -z "$start_point" && "$OPT_DRY_RUN" != true ]]; then
+        # The parent may simply not be fetched yet — try before de-stacking.
+        git fetch origin "$parent_branch" >&2 2>/dev/null || true
+        start_point="$(resolve_start_point "$parent_branch")"
+      fi
       [[ -z "$start_point" ]] && {
         warn "stack parent $parent_branch not found locally or on origin — branching from $BMAD_PR_TRUNK"
         parent_branch=$BMAD_PR_TRUNK
@@ -285,6 +294,10 @@ cmd_ship() {
 
   local body_file result number url
   body_file="$(build_body_file "$KEY" "$OPT_PHASE" "$parent_pr" "$run_id")"
+  # set -e exits straight past a plain rm on backend failure — the trap
+  # cleans up on every exit path. ${var:-} because the trap also fires
+  # after this function's locals are gone (set -u).
+  trap 'rm -f "${body_file:-}"' EXIT
   result="$("${tool}_ship" "$branch" "$parent_branch" "$title" "$body_file" "$draft" "$amend_number")"
   rm -f "$body_file"
   number="${result%%$'\t'*}"
@@ -342,15 +355,18 @@ do_ingest() {
     approved="$(reviewer_approved "$pr" "$head_sha")"
   fi
 
+  local review_count=0
+  if [[ "${BMAD_PR_REVIEWER:-none}" != none ]]; then
+    review_count="$(reviewer_review_count "$pr" "$head_sha")"
+  fi
+
   # A configured score contract (BMAD_PR_SCORE_REGEX) with a completed
   # review that carries no score is a misconfiguration signal, not a green:
   # the target repo is missing the contract (cubic: custom_instructions).
   local score_missing=false
-  if [[ "${BMAD_PR_REVIEWER:-none}" != none && -n "${BMAD_PR_SCORE_REGEX:-}" &&
-    -z "$score" && "$approved" != true ]]; then
-    if (($(reviewer_review_count "$pr" "$head_sha") > 0)); then
-      score_missing=true
-    fi
+  if [[ -n "${BMAD_PR_SCORE_REGEX:-}" && -z "$score" && "$approved" != true ]] &&
+    ((review_count > 0)); then
+    score_missing=true
   fi
 
   local out_dir
@@ -360,11 +376,18 @@ do_ingest() {
   findings_render "$key" "$pr" "$threads" "$failing" "$score" "$approved" \
     "$score_missing" >"$INGEST_FILE"
 
+  # Record lastReviewedSha only when the reviewer actually produced output
+  # for this head — recording it on e.g. a CI-failed ingest would make the
+  # first rereview trigger skip as "already sent" (dedupe R12).
+  local reviewed_sha=""
+  if ((review_count > 0)) || [[ "$(jq 'length' <<<"$threads")" -gt 0 ]]; then
+    reviewed_sha="$head_sha"
+  fi
   ledger_update "$key" \
     '.reviewer.lastScore = (if $score == "" then null else ($score | tonumber) end)
      | .reviewer.approved = ($approved == "true")
      | (if $sha != "" then .reviewer.lastReviewedSha = $sha else . end)' \
-    --arg score "$score" --arg approved "$approved" --arg sha "$head_sha"
+    --arg score "$score" --arg approved "$approved" --arg sha "$reviewed_sha"
 
   INGEST_THREADS="$(jq 'length' <<<"$threads")"
   INGEST_FAILING="$(jq 'length' <<<"$failing")"
@@ -556,6 +579,17 @@ cmd_rereview() {
     return 0
   fi
 
+  # Push pending local commits FIRST: resolving threads before a failed
+  # push would hide reviewer findings while the fixes never reached the PR.
+  if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    local unpushed
+    unpushed="$(git rev-list --count '@{u}..HEAD')"
+    if ((unpushed > 0)); then
+      log "pushing $unpushed unpushed commit(s)"
+      git push >&2
+    fi
+  fi
+
   local resolved=0
   if [[ "$OPT_RESOLVE_ADDRESSED" == true ]]; then
     local -a ids=()
@@ -566,16 +600,6 @@ cmd_rereview() {
       log "resolved $resolved addressed thread(s)"
     else
       log "no [x] findings with thread ids to resolve"
-    fi
-  fi
-
-  # Push pending local commits so the reviewer sees the fixes.
-  if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
-    local behind
-    behind="$(git rev-list --count '@{u}..HEAD')"
-    if ((behind > 0)); then
-      log "pushing $behind pending commit(s)"
-      git push >&2
     fi
   fi
 

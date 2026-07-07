@@ -17,16 +17,19 @@ repo_slug() {
 }
 
 # reviewer_check_latest <sha> → the newest matching check run (JSON), or null.
+# Paginated (a busy commit can have >1 page of check runs). Runs without
+# started_at (queued) sort as NEWEST — a freshly queued attempt must win
+# over an older completed run for the same SHA.
 reviewer_check_latest() {
   local sha=$1
   if [[ -z "${BMAD_PR_REVIEWER_CHECK_REGEX:-}" ]]; then
     printf 'null\n'
     return 0
   fi
-  gh api "repos/$(repo_slug)/commits/$sha/check-runs" 2>/dev/null |
-    jq --arg re "$BMAD_PR_REVIEWER_CHECK_REGEX" '
-      [.check_runs[] | select(.name | test($re; "i"))]
-      | sort_by(.started_at // "") | last // null' ||
+  gh api --paginate "repos/$(repo_slug)/commits/$sha/check-runs" 2>/dev/null |
+    jq -s --arg re "$BMAD_PR_REVIEWER_CHECK_REGEX" '
+      [.[].check_runs[] | select(.name | test($re; "i"))]
+      | sort_by(.started_at // "9999-12-31T23:59:59Z") | last // null' ||
     printf 'null\n'
 }
 
@@ -162,7 +165,10 @@ reviewer_wait() {
     fi
     if [[ "${BMAD_PR_REVIEWER_COMPLETION:-check-run}" == "check-run" ]]; then
       state="$(reviewer_check_state "$sha")"
-      [[ "$state" == "queued" || "$state" == "in_progress" ]] && seen_signal=true
+      # Any documented non-completed active status is a lifecycle signal.
+      case "$state" in
+        queued | in_progress | requested | waiting | pending) seen_signal=true ;;
+      esac
       if [[ "$seen_signal" == false ]] && (($(epoch) >= grace_deadline)); then
         printf 'absent\n'
         return 1

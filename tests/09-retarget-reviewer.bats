@@ -139,6 +139,20 @@ run_reviewer_wait() { # timeout since
   [ "$output" = "timeout" ]
 }
 
+@test "reviewer_check_state: freshly queued run wins over older completed run" {
+  export GH_STUB_CHECKRUNS='{"check_runs":[
+    {"name":"cubic","status":"completed","started_at":"2026-07-06T11:00:00Z","completed_at":"2026-07-06T12:00:00Z"},
+    {"name":"cubic","status":"queued"}]}'
+  run bash -c "
+    cd '$REPO'
+    export PATH='$STUB_DIR:$PATH' LIB_SOURCE_DIR='$LIB_DIR'
+    export BMAD_PR_REVIEWER_CHECK_REGEX='^cubic'
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/reviewer.sh'
+    reviewer_check_state deadbeef"
+  [ "$status" -eq 0 ]
+  [ "$output" = "queued" ]
+}
+
 @test "reviewer_approved reflects the LATEST review state, not any past approval" {
   export GH_STUB_REVIEWS='[
     {"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"APPROVED","submitted_at":"2026-07-06T10:00:00Z","commit_id":"deadbeef","body":"lgtm"},

@@ -163,6 +163,22 @@ write_ledger() { # key branch parent_branch parent_pr number state openedAt
   [ "$(git rev-parse HEAD)" != "$(git rev-parse bmad/story/3.1)" ]
 }
 
+@test "ship fetches an unfetched stack parent before de-stacking to trunk" {
+  git switch -qc bmad/story/3.1
+  git commit -q --allow-empty -m "parent work"
+  git push -qu origin bmad/story/3.1
+  git switch -q main
+  write_ledger 3.1 bmad/story/3.1 "" "" 41 open 2026-07-01T10:00:00Z
+  # simulate a machine that never fetched the parent branch
+  git branch -qD bmad/story/3.1
+  git update-ref -d refs/remotes/origin/bmad/story/3.1
+
+  run "$BMAD_PR_BIN" ship --story 3.2 --phase dev-story
+  [ "$status" -eq 0 ]
+  gh_called "pr create" "--base bmad/story/3.1"
+  [ "$(jq -r '.parentBranch' "$REPO/_bmad-output/pr/3.2.json")" = "bmad/story/3.1" ]
+}
+
 @test "ship refuses when another ledger file is corrupt (no silent de-stack)" {
   mkdir -p "$REPO/_bmad-output/pr"
   echo '{broken' >"$REPO/_bmad-output/pr/zz.json"
