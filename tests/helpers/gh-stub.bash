@@ -33,6 +33,7 @@ case "$all" in
     fi
     ;;
   pr\ list*) printf '%s\n' "${GH_STUB_OPEN_PR:-}" ;;
+  api\ repos/*pulls?head=*) printf '%s\n' "${GH_STUB_OPEN_PR:-}" ;;
   pr\ create*) printf 'https://github.com/o/r/pull/%s\n' "${GH_STUB_NEW_PR:-42}" ;;
   pr\ view*) printf 'https://github.com/o/r/pull/42\n' ;;
   pr\ edit*) exit 0 ;;

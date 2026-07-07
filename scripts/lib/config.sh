@@ -8,10 +8,16 @@
 BMAD_PR_CONFIG_KEYS=(
   BMAD_PR_TOOL              # auto | gt | gh | git
   BMAD_PR_TRUNK             # trunk branch PRs ultimately target
+  BMAD_PR_REMOTE            # push remote (default origin)
   BMAD_PR_DRAFT             # true | false — open PRs as drafts
   BMAD_PR_LEDGER_DIR        # relative to repo root
   BMAD_PR_STAGE_GLOB        # CH3 scope: tree changes outside this path refuse
+  BMAD_PR_STAGE_MODE        # all | tracked — what CH3 --auto-fix stages
   BMAD_PR_BRANCH_PREFIX     # story branches: <prefix>/story/<key>
+  BMAD_PR_TEMPLATE          # PR body template path (relative to repo root)
+  BMAD_PR_TITLE_FORMAT      # bmad | conventional
+  BMAD_PR_TITLE_EMOJI       # true | false — phase-emoji title prefix
+  BMAD_PR_LABELS            # comma list of labels applied on PR creation
   BMAD_PR_REVIEWER          # cubic | generic | none
   BMAD_PR_REVIEWER_BOT_REGEX
   BMAD_PR_REVIEWER_CHECK_REGEX
@@ -22,6 +28,7 @@ BMAD_PR_CONFIG_KEYS=(
   BMAD_PR_TIMEOUT           # seconds for watch
   BMAD_PR_POLL_INTERVAL     # initial poll interval, seconds
   BMAD_PR_REGISTER_GRACE    # seconds to wait for check suites to register
+  BMAD_PR_LOCK_TIMEOUT      # seconds to wait for the per-entry ledger lock
   BMAD_PR_MAX_ITERATIONS    # review-cycle ceiling (used by the loop skill)
 )
 
@@ -36,15 +43,22 @@ config_is_known_key() {
 config_defaults() {
   : "${BMAD_PR_TOOL:=auto}"
   : "${BMAD_PR_TRUNK:=main}"
+  : "${BMAD_PR_REMOTE:=origin}"
   : "${BMAD_PR_DRAFT:=true}"
   : "${BMAD_PR_LEDGER_DIR:=_bmad-output/pr}"
   : "${BMAD_PR_STAGE_GLOB:=_bmad-output/}"
+  : "${BMAD_PR_STAGE_MODE:=all}"
   : "${BMAD_PR_BRANCH_PREFIX:=bmad}"
+  : "${BMAD_PR_TEMPLATE:=.github/bmad-pr-template.md}"
+  : "${BMAD_PR_TITLE_FORMAT:=bmad}"
+  : "${BMAD_PR_TITLE_EMOJI:=false}"
+  : "${BMAD_PR_LABELS:=}"
   : "${BMAD_PR_REVIEWER:=cubic}"
   : "${BMAD_PR_SCORE_THRESHOLD:=8}"
   : "${BMAD_PR_TIMEOUT:=1800}"
   : "${BMAD_PR_POLL_INTERVAL:=15}"
   : "${BMAD_PR_REGISTER_GRACE:=90}"
+  : "${BMAD_PR_LOCK_TIMEOUT:=10}"
   : "${BMAD_PR_MAX_ITERATIONS:=5}"
 }
 
@@ -92,6 +106,13 @@ config_load() {
   case "/$BMAD_PR_LEDGER_DIR/" in
     //* | *"/../"* | *"/./"*)
       refuse "BMAD_PR_LEDGER_DIR must be a repo-relative path without '..' segments (got: $BMAD_PR_LEDGER_DIR)"
+      ;;
+  esac
+  # Same for the body template: its contents get published to GitHub, so a
+  # traversal path could exfiltrate files from outside the repository.
+  case "/$BMAD_PR_TEMPLATE/" in
+    //* | *"/../"* | *"/./"*)
+      refuse "BMAD_PR_TEMPLATE must be a repo-relative path without '..' segments (got: $BMAD_PR_TEMPLATE)"
       ;;
   esac
 

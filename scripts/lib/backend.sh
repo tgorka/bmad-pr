@@ -18,7 +18,7 @@ backend_detect() {
   esac
 
   local url
-  url="$(git remote get-url origin 2>/dev/null || true)"
+  url="$(git remote get-url "${BMAD_PR_REMOTE:-origin}" 2>/dev/null || true)"
   if [[ -z "$url" ]]; then
     printf 'git\n'
     return 0

@@ -26,10 +26,11 @@ git_compare_url() {
 # Prints "\t" (no PR number/url).
 git_ship() {
   local branch=$1 parent=$2
-  git push -u origin "$branch" >&2 || die "git push failed for $branch"
+  local remote="${BMAD_PR_REMOTE:-origin}"
+  git push -u "$remote" "$branch" >&2 || die "git push failed for $branch"
 
   local url
-  url="$(git_compare_url "$(git remote get-url origin)")"
+  url="$(git_compare_url "$(git remote get-url "$remote")")"
   log "no PR backend available — branch pushed; open the PR manually:"
   case "$url" in
     https://github.*)

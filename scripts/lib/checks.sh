@@ -8,8 +8,14 @@
 # code — trust whether the output parses as an array. A hard API failure
 # must NOT read as "no checks": that would let watch proceed false-green.
 checks_snapshot() {
+  # Base-repo scoped when the slug cache is warm (fork workflows, DW-3);
+  # never resolves the slug itself — a slug failure must not break the
+  # null-on-error contract below.
   local out
-  out="$(gh pr checks "$1" --json name,bucket,link,description 2>/dev/null || true)"
+  local -a repo_args=()
+  [[ -n "${_BMAD_PR_REPO_SLUG:-}" ]] && repo_args=(--repo "$_BMAD_PR_REPO_SLUG")
+  out="$(gh pr checks "$1" --json name,bucket,link,description \
+    "${repo_args[@]}" 2>/dev/null || true)"
   if ! jq -e 'type == "array"' >/dev/null 2>&1 <<<"$out"; then
     printf 'null\n'
     return 0

@@ -1,0 +1,13 @@
+BMAD slice for story {{story}}, phase {{phase}}.
+
+Artifact: {{artifact}}
+Stacked on: #{{parent_pr}}
+Generated: {{timestamp}}
+
+<!-- Copy to {project-root}/.github/bmad-pr-template.md (or the path set in
+     BMAD_PR_TEMPLATE). Placeholders are substituted literally — never
+     shell-evaluated. Available: {{story}} {{phase}} {{artifact}}
+     {{parent_pr}} {{run_id}} {{timestamp}}. Anything else (issue links,
+     checklists, team boilerplate) is plain markdown you own. -->
+
+BMAD-Run-Id: {{run_id}}

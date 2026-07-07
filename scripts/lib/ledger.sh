@@ -35,6 +35,12 @@ ledger_read() {
   cat "$path"
 }
 
+# Best-effort durability (DW-5): fdatasync the file when coreutils supports
+# it, fall back to a filesystem-wide sync, never fail the write over it.
+ledger_sync() {
+  sync -d -- "$1" 2>/dev/null || sync 2>/dev/null || true
+}
+
 # Write ledger JSON (stdin) for a key, atomically, validating first.
 # mktemp creates the temp file safely (no pre-planted symlink can redirect
 # the write outside the repo).
@@ -52,7 +58,28 @@ ledger_write() {
     rm -f "$tmp"
     die "internal: refusing to write invalid ledger JSON for $key"
   fi
+  # Content durable before the rename becomes visible; entry durable after.
+  ledger_sync "$tmp"
   mv "$tmp" "$path"
+  ledger_sync "$path"
+}
+
+# Portable mkdir-based lock (DW-6) — flock(1) is absent on macOS; mkdir is
+# atomic everywhere. Guards the read-modify-write in ledger_update against
+# concurrent invocations (parallel worktrees on the same story).
+ledger_lock() {
+  local path=$1 lockdir="$1.lock"
+  local deadline
+  deadline=$(($(epoch) + ${BMAD_PR_LOCK_TIMEOUT:-10}))
+  until mkdir "$lockdir" 2>/dev/null; do
+    (($(epoch) >= deadline)) &&
+      refuse "ledger busy: $lockdir held by another bmad-pr run (remove the dir if it is stale)"
+    sleep 0.2
+  done
+}
+
+ledger_unlock() {
+  rmdir "$1.lock" 2>/dev/null || true
 }
 
 # Newest ledger entry with an open PR, excluding the given key. This is the
@@ -123,12 +150,23 @@ ledger_new_entry() {
     }'
 }
 
-# Apply a jq filter to an existing ledger entry and persist the result.
+# Apply a jq filter to an existing ledger entry and persist the result,
+# under the per-entry lock (read-modify-write must not interleave).
 # Usage: ledger_update <key> <jq-filter> [jq args...]
 ledger_update() {
   local key=$1 filter=$2
   shift 2
+  local path rc=0
+  path="$(ledger_path "$key")" || exit "$EX_REFUSE"
+  ledger_lock "$path"
   local current
-  current="$(ledger_read "$key")" || die "internal: ledger_update on missing ledger for $key"
-  jq "$@" "$filter" <<<"$current" | ledger_write "$key"
+  if current="$(ledger_read "$key")"; then
+    jq "$@" "$filter" <<<"$current" | ledger_write "$key" || rc=$?
+  else
+    rc=$?
+    ledger_unlock "$path"
+    die "internal: ledger_update on missing/unreadable ledger for $key (rc $rc)"
+  fi
+  ledger_unlock "$path"
+  return "$rc"
 }

@@ -1,8 +1,9 @@
 # Deferred Work
 
 Canonical ledger (bmad DW format). Triaged 2026-07-07 against the v1.0.0
-plugin rewrite (PR #11, tag `v1.0.0`); the pre-rewrite v0 ledger and its
-resolutions are recorded at the bottom for audit.
+plugin rewrite (PR #11, tag `v1.0.0`); the whole DW-1..DW-9 batch was then
+implemented the same day (spec-dw-backlog-1.md). The pre-rewrite v0 ledger
+and its resolutions are recorded at the bottom for audit.
 
 ### DW-1: PR body template engine (v0 goal G6)
 
@@ -13,7 +14,8 @@ reason: v1 ships a fixed body (summary + artifact link + Stacked-on + BMAD-Run-I
   trailer). Templates (`.github/bmad-pr-template.md` placeholders), phase emoji,
   Conventional-Commits titles, label maps and Linear/Jira auto-links are polish
   that should wait for real usage feedback.
-status: open
+status: done 2026-07-07 (spec-dw-backlog-1.md)
+resolution: BMAD_PR_TEMPLATE literal-substitution body templates, BMAD_PR_TITLE_FORMAT (bmad|conventional), BMAD_PR_TITLE_EMOJI, BMAD_PR_LABELS on creation. Per-phase maps live in the template.
 
 ### DW-2: Planning-phase stacks (bmad/planning/<phase>)
 
@@ -23,7 +25,8 @@ severity: medium
 reason: v1 implements story stacks only (`bmad/story/<key>`). Planning phases
   currently ship like any other story key; dedicated planning-stack semantics
   (one PR per planning phase, stacked) need D1's design carried over.
-status: open
+status: done 2026-07-07 (spec-dw-backlog-1.md)
+resolution: ship --planning — branch <prefix>/planning/<phase>, ledger key planning-<phase>; stacking chains naturally via newest-open resolution.
 
 ### DW-3: Multi-remote target selection (fork-and-upstream)
 
@@ -33,7 +36,8 @@ severity: medium
 reason: v1 always passes explicit --base/--head but assumes the `origin`
   remote. Fork workflows need a `BMAD_PR_TARGET_REMOTE` (prefer `upstream`
   when present) and a base-repo flag for gh.
-status: open
+status: done 2026-07-07 (spec-dw-backlog-1.md)
+resolution: BMAD_PR_REMOTE parametrizes every remote reference; an `upstream` remote becomes the base repo (queries + gh pr create --repo with fork-qualified --head). Known limit: adoption-by-branch matches within the base repo only.
 
 ### DW-4: CH4 detector — gt mid-restack state
 
@@ -43,7 +47,8 @@ severity: low
 reason: v1 relies on gt's own failure messages when a stack is mid-restack.
   A preflight detector (parse `gt log` / rebase state) would refuse earlier
   with a cleaner hint.
-status: open
+status: done 2026-07-07 (spec-dw-backlog-1.md)
+resolution: CH2 detects the gt-initialized repo and hints `gt continue` / `gt rebase --abort` (gt restacks ride the git-rebase machinery CH2 already catches).
 
 ### DW-5: Durable ledger writes (fsync before rename)
 
@@ -53,7 +58,8 @@ severity: low
 reason: mktemp + mv is atomic on one filesystem but not durable across power
   loss. bash has no portable fsync; would need `sync -f` (coreutils ≥ 8.24)
   or a tiny helper. Couples with DW-6.
-status: open
+status: done 2026-07-07 (spec-dw-backlog-1.md)
+resolution: best-effort `sync -d` of temp before rename and of the final path after (fallback plain sync; never fails the write).
 
 ### DW-6: Concurrent-invocation file lock (CH14)
 
@@ -63,7 +69,8 @@ severity: low
 reason: two bmad-pr processes (parallel worktrees) can interleave
   read-modify-write on the same ledger file. flock(1) around ledger_update
   would close it; rare in practice because keys are per-story.
-status: open
+status: done 2026-07-07 (spec-dw-backlog-1.md)
+resolution: portable mkdir lock around ledger_update read-modify-write (<path>.lock/, BMAD_PR_LOCK_TIMEOUT, stale-dir refusal message).
 
 ### DW-7: Offline/rate-limit queueing (D6/CH7)
 
@@ -73,7 +80,8 @@ severity: low
 reason: v1 fails fast on network errors (loudly, never green). A
   `pr-status: queued` marker + drain-on-next-run was designed in v0 but adds
   state complexity disproportionate to current need.
-status: open
+status: superseded 2026-07-07
+resolution: superseded — idempotent ship/amend + rereview dedupe make re-running after an outage drain naturally; queue state would add complexity for no behavior gain.
 
 ### DW-8: CH3 staging granularity
 
@@ -84,7 +92,8 @@ reason: `git add -- $scope` stages every untracked + modified path under the
   scope, including files the user has not reviewed. `git add -u` (tracked
   only) is stricter but would skip new BMAD artifacts. Current wide behavior
   is documented; revisit with usage feedback.
-status: open
+status: done 2026-07-07 (spec-dw-backlog-1.md)
+resolution: BMAD_PR_STAGE_MODE=tracked switches the CH3 auto-fix to `git add -u -- <scope>`.
 
 ### DW-9: CH1 auto-fix branch-name collision window
 
@@ -93,7 +102,8 @@ location: scripts/lib/preflight.sh preflight_ch1_fix
 severity: low
 reason: branch suffix uses epoch seconds; sub-second double invocation could
   collide. Accepted risk — git refuses the duplicate branch, nothing corrupts.
-status: open
+status: done 2026-07-07 (spec-dw-backlog-1.md)
+resolution: auto-fix branch suffix is <sha>-<epoch>-<pid>.
 
 ---
 
