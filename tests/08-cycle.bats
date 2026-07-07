@@ -88,6 +88,22 @@ set_reviewed() { # sha
   [ "$(jq -r '.score' <<<"$output")" = "10" ]
 }
 
+@test "watch: completed review WITHOUT the configured score → exit 3, not green" {
+  export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
+  export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic","status":"completed","started_at":"2026-07-06T11:30:00Z","completed_at":"2026-07-06T12:00:00Z"}]}'
+  export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T12:00:00Z","commit_id":"'"$HEAD_SHA"'","body":"Looks fine overall."}]'
+  run "$BMAD_PR_BIN" watch --story 3.2
+  [ "$status" -eq 3 ]
+  grep -q 'score:missing' "$REPO/_bmad-output/pr/3.2-findings.md"
+}
+
+@test "status dies when the checks state cannot be fetched" {
+  export GH_STUB_CHECKS='null'
+  run "$BMAD_PR_BIN" status --story 3.2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not fetch CI checks"* ]]
+}
+
 @test "watch: completed check run from BEFORE the re-review trigger doesn't count" {
   export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
   # run completed at 12:00, but the re-review was triggered at 13:00 —

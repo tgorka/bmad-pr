@@ -342,12 +342,23 @@ do_ingest() {
     approved="$(reviewer_approved "$pr" "$head_sha")"
   fi
 
+  # A configured score contract (BMAD_PR_SCORE_REGEX) with a completed
+  # review that carries no score is a misconfiguration signal, not a green:
+  # the target repo is missing the contract (cubic: custom_instructions).
+  local score_missing=false
+  if [[ "${BMAD_PR_REVIEWER:-none}" != none && -n "${BMAD_PR_SCORE_REGEX:-}" &&
+    -z "$score" && "$approved" != true ]]; then
+    if (($(reviewer_review_count "$pr" "$head_sha") > 0)); then
+      score_missing=true
+    fi
+  fi
+
   local out_dir
   out_dir="$(ledger_dir)" || exit "$EX_REFUSE"
   mkdir -p "$out_dir"
   INGEST_FILE="$(findings_path "$key")" || exit "$EX_REFUSE"
   findings_render "$key" "$pr" "$threads" "$failing" "$score" "$approved" \
-    >"$INGEST_FILE"
+    "$score_missing" >"$INGEST_FILE"
 
   ledger_update "$key" \
     '.reviewer.lastScore = (if $score == "" then null else ($score | tonumber) end)
@@ -367,6 +378,8 @@ do_ingest() {
     INGEST_VERDICT=findings
   elif [[ "$approved" != true && -n "$score" ]] &&
     ((score < ${BMAD_PR_SCORE_THRESHOLD:-8})); then
+    INGEST_VERDICT=findings
+  elif [[ "$score_missing" == true ]]; then
     INGEST_VERDICT=findings
   fi
 }
@@ -412,6 +425,9 @@ cmd_status() {
   local live checks_json checks_verdict threads score approved unresolved
   live="$(gh_pr_state "$PR_NUMBER")"
   checks_json="$(checks_snapshot "$PR_NUMBER")"
+  # An unfetchable checks state must not read as success.
+  [[ "$checks_json" != null ]] ||
+    die "could not fetch CI checks for PR #$PR_NUMBER (gh auth? network? rate limit?)"
   checks_verdict="$(checks_aggregate <<<"$checks_json")"
   threads='[]' score="" approved=false
   if [[ "${BMAD_PR_REVIEWER:-none}" != none ]]; then
@@ -447,6 +463,13 @@ cmd_status() {
   ((unresolved > 0)) && exit "$EX_FINDINGS"
   if [[ "$approved" != true && -n "$score" ]] &&
     ((score < ${BMAD_PR_SCORE_THRESHOLD:-8})); then
+    exit "$EX_FINDINGS"
+  fi
+  # Same misconfiguration signal as ingest: reviews exist but none carries
+  # the configured score contract.
+  if [[ "${BMAD_PR_REVIEWER:-none}" != none && -n "${BMAD_PR_SCORE_REGEX:-}" &&
+    -z "$score" && "$approved" != true ]] &&
+    (($(reviewer_review_count "$PR_NUMBER" "$(jq -r '.headRefOid // ""' <<<"$live")") > 0)); then
     exit "$EX_FINDINGS"
   fi
   exit "$EX_OK"

@@ -118,16 +118,37 @@ run_reviewer_wait() { # timeout since
   [ "$output" = "7" ]
 }
 
-@test "reviewer_wait bot-review: fresh review completes" {
-  export GH_STUB_REVIEWS='[{"user":{"login":"coderabbitai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T12:00:00Z","body":"done"}]'
+@test "reviewer_wait bot-review: fresh review of the head completes" {
+  export GH_STUB_REVIEWS='[{"user":{"login":"coderabbitai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T12:00:00Z","commit_id":"deadbeef","body":"done"}]'
   run_reviewer_wait 5 "2026-07-06T11:00:00Z"
   [ "$status" -eq 0 ]
   [ "$output" = "completed" ]
 }
 
 @test "reviewer_wait bot-review: stale reviews don't complete; full timeout, not absent" {
-  export GH_STUB_REVIEWS='[{"user":{"login":"coderabbitai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T10:00:00Z","body":"old"}]'
+  export GH_STUB_REVIEWS='[{"user":{"login":"coderabbitai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T10:00:00Z","commit_id":"deadbeef","body":"old"}]'
   run_reviewer_wait 3 "2026-07-06T11:00:00Z"
   [ "$status" -eq 1 ]
   [ "$output" = "timeout" ]
+}
+
+@test "reviewer_wait bot-review: late review of a DIFFERENT commit doesn't complete" {
+  export GH_STUB_REVIEWS='[{"user":{"login":"coderabbitai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T12:00:00Z","commit_id":"0ldc0mmit","body":"late but stale"}]'
+  run_reviewer_wait 3 "2026-07-06T11:00:00Z"
+  [ "$status" -eq 1 ]
+  [ "$output" = "timeout" ]
+}
+
+@test "reviewer_approved reflects the LATEST review state, not any past approval" {
+  export GH_STUB_REVIEWS='[
+    {"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"APPROVED","submitted_at":"2026-07-06T10:00:00Z","commit_id":"deadbeef","body":"lgtm"},
+    {"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T11:00:00Z","commit_id":"deadbeef","body":"actually, issues found"}]'
+  run bash -c "
+    cd '$REPO'
+    export PATH='$STUB_DIR:$PATH' LIB_SOURCE_DIR='$LIB_DIR'
+    export BMAD_PR_REVIEWER_BOT_REGEX='^cubic'
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/reviewer.sh'
+    reviewer_approved 42 deadbeef"
+  [ "$status" -eq 0 ]
+  [ "$output" = "false" ]
 }

@@ -75,8 +75,8 @@ reviewer_latest_score() {
 }
 
 # reviewer_approved <pr> [head_sha] → prints true|false. Scoped to the
-# current head when given — a stale approval of an older revision must not
-# green-light freshly pushed commits.
+# current head when given, and based on the reviewer's LATEST review state —
+# an approval superseded by a later non-approval review no longer counts.
 reviewer_approved() {
   local pr=$1 sha=${2:-}
   reviewer_reviews "$pr" |
@@ -85,8 +85,22 @@ reviewer_approved() {
         | select(.user.type == "Bot")
         | select(.user.login | test($bot; "i"))
         | select($sha == "" or .commit_id == $sha)
-        | select(.state == "APPROVED")
-      ] | length > 0'
+      ] | sort_by(.submitted_at) | last
+      | ((.state // "") == "APPROVED")'
+}
+
+# reviewer_review_count <pr> [head_sha] → number of bot reviews (scoped to a
+# head when given). Distinguishes "reviewer produced output but no score"
+# from "reviewer has not reviewed this commit at all".
+reviewer_review_count() {
+  local pr=$1 sha=${2:-}
+  reviewer_reviews "$pr" |
+    jq -r --arg bot "$BMAD_PR_REVIEWER_BOT_REGEX" --arg sha "$sha" '
+      [ .[]
+        | select(.user.type == "Bot")
+        | select(.user.login | test($bot; "i"))
+        | select($sha == "" or .commit_id == $sha)
+      ] | length'
 }
 
 # reviewer_completed <pr> <sha> <since_iso> → rc 0 when a review completed.
@@ -107,12 +121,17 @@ reviewer_completed() {
       return 0
       ;;
     bot-review)
+      # Scope to the current head AND to this cycle: a late-landing review
+      # of an OLDER commit submitted after `since` must not complete the
+      # wait for the freshly pushed SHA.
       local n
       n="$(reviewer_reviews "$pr" |
-        jq -r --arg bot "$BMAD_PR_REVIEWER_BOT_REGEX" --arg since "$since" '
+        jq -r --arg bot "$BMAD_PR_REVIEWER_BOT_REGEX" --arg since "$since" \
+          --arg sha "$sha" '
           [ .[]
             | select(.user.type == "Bot")
             | select(.user.login | test($bot; "i"))
+            | select($sha == "" or .commit_id == $sha)
             | select($since == "" or .submitted_at > $since)
           ] | length')"
       [[ "$n" -gt 0 ]]
