@@ -28,6 +28,7 @@ BMAD_PR_CONFIG_KEYS=(
   BMAD_PR_TIMEOUT           # seconds for watch
   BMAD_PR_POLL_INTERVAL     # initial poll interval, seconds
   BMAD_PR_REGISTER_GRACE    # seconds to wait for check suites to register
+  BMAD_PR_LOCK_TIMEOUT      # seconds to wait for the per-entry ledger lock
   BMAD_PR_MAX_ITERATIONS    # review-cycle ceiling (used by the loop skill)
 )
 
@@ -57,6 +58,7 @@ config_defaults() {
   : "${BMAD_PR_TIMEOUT:=1800}"
   : "${BMAD_PR_POLL_INTERVAL:=15}"
   : "${BMAD_PR_REGISTER_GRACE:=90}"
+  : "${BMAD_PR_LOCK_TIMEOUT:=10}"
   : "${BMAD_PR_MAX_ITERATIONS:=5}"
 }
 
@@ -104,6 +106,13 @@ config_load() {
   case "/$BMAD_PR_LEDGER_DIR/" in
     //* | *"/../"* | *"/./"*)
       refuse "BMAD_PR_LEDGER_DIR must be a repo-relative path without '..' segments (got: $BMAD_PR_LEDGER_DIR)"
+      ;;
+  esac
+  # Same for the body template: its contents get published to GitHub, so a
+  # traversal path could exfiltrate files from outside the repository.
+  case "/$BMAD_PR_TEMPLATE/" in
+    //* | *"/../"* | *"/./"*)
+      refuse "BMAD_PR_TEMPLATE must be a repo-relative path without '..' segments (got: $BMAD_PR_TEMPLATE)"
       ;;
   esac
 

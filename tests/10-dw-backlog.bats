@@ -133,6 +133,45 @@ EOF
   gh_called "--repo up/base" "--head me:bmad/story/9.9"
 }
 
+@test "fork flow: gh_retarget rebases from upstream, pushes to the fork" {
+  make_stub git <<'EOF'
+case "$*" in
+  "remote get-url upstream") echo "https://github.com/up/base.git" ;;
+  *) exit 0 ;;
+esac
+EOF
+  run bash -c "
+    export PATH='$STUB_DIR:$PATH' LIB_SOURCE_DIR='$LIB_DIR'
+    export BMAD_PR_REMOTE=origin
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/reviewer.sh'
+    source '$LIB_DIR/backend-gh.sh'
+    gh_retarget 42 main bmad/story/3.2 abc123"
+  [ "$status" -eq 0 ]
+  stub_calls git | tr '\037' ' ' | grep -q '^fetch upstream$'
+  stub_calls git | tr '\037' ' ' | grep -q '^rebase --onto upstream/main abc123 bmad/story/3.2$'
+  stub_calls git | tr '\037' ' ' | grep -q '^push --force-with-lease origin bmad/story/3.2$'
+  gh_called "pr edit 42" "--repo up/base" "--base main"
+}
+
+@test "fork flow: amend edits the PR in the base repo" {
+  make_stub git <<'EOF'
+case "$*" in
+  "remote get-url upstream") echo "https://github.com/up/base.git" ;;
+  "remote get-url origin") echo "git@github.com:me/base.git" ;;
+  *) exit 0 ;;
+esac
+EOF
+  run bash -c "
+    export PATH='$STUB_DIR:$PATH' LIB_SOURCE_DIR='$LIB_DIR'
+    export BMAD_PR_REMOTE=origin
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/reviewer.sh'
+    source '$LIB_DIR/backend-gh.sh'
+    body=\$(mktemp)
+    gh_ship bmad/story/9.9 main 'BMAD: 9.9 dev-story' \"\$body\" true 42"
+  [ "$status" -eq 0 ]
+  gh_called "pr edit 42" "--repo up/base"
+}
+
 # ── DW-4: gt-aware CH2 hint ──────────────────────────────────────────────────
 
 @test "CH2 in a gt repo hints gt continue" {

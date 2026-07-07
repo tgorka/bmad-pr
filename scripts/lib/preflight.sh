@@ -45,7 +45,8 @@ preflight_ch1() {
 
 preflight_ch1_fix() {
   # epoch + PID: two invocations in the same second cannot collide (DW-9).
-  git switch -c "bmad-pr/$(git rev-parse --short HEAD)-$(epoch)-$$"
+  # BASHPID (not $$) so sourced/subshell contexts get the executing shell.
+  git switch -c "bmad-pr/$(git rev-parse --short HEAD)-$(epoch)-${BASHPID:-$$}"
 }
 
 # CH2 — mid-rebase / mid-merge. Refuse hard; never auto-fix. In a

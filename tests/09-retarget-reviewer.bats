@@ -46,7 +46,7 @@ make_stack() {
   run "$BMAD_PR_BIN" retarget --story 3.2
   [ "$status" -eq 0 ]
   gh_called "pr view 41"
-  gh_called "pr edit 42 --base main"
+  gh_called "pr edit 42" "--base main"
   # branch now sits on origin/main
   [ "$(git merge-base HEAD origin/main)" = "$(git rev-parse origin/main)" ]
   # and was force-pushed

@@ -69,7 +69,8 @@ ledger_write() {
 # concurrent invocations (parallel worktrees on the same story).
 ledger_lock() {
   local path=$1 lockdir="$1.lock"
-  local deadline=$(($(epoch) + ${BMAD_PR_LOCK_TIMEOUT:-10}))
+  local deadline
+  deadline=$(($(epoch) + ${BMAD_PR_LOCK_TIMEOUT:-10}))
   until mkdir "$lockdir" 2>/dev/null; do
     (($(epoch) >= deadline)) &&
       refuse "ledger busy: $lockdir held by another bmad-pr run (remove the dir if it is stale)"

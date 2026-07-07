@@ -118,6 +118,20 @@ setup() {
   [[ "$output" == *"develop"* ]]
 }
 
+@test "config_load refuses traversal in BMAD_PR_TEMPLATE" {
+  run bash -c "
+    export LIB_SOURCE_DIR='$LIB_DIR' BMAD_PR_TEMPLATE='../outside/evil.md'
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/config.sh'
+    config_load '$ROOT'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"BMAD_PR_TEMPLATE"* ]]
+  run bash -c "
+    export LIB_SOURCE_DIR='$LIB_DIR' BMAD_PR_TEMPLATE='/etc/passwd'
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/config.sh'
+    config_load '$ROOT'"
+  [ "$status" -eq 2 ]
+}
+
 @test "reviewer none clears previously loaded provider settings" {
   config_load "$ROOT" # loads the cubic profile
   [ -n "$BMAD_PR_REVIEWER_TRIGGER" ]

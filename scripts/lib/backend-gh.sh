@@ -4,8 +4,15 @@
 
 # Number of the open PR whose head is <branch>, or empty.
 # (gh pr view alone would also resolve merged/closed PRs — don't use it here.)
+# --repo pins the base repo so fork workflows don't query the fork.
 gh_pr_open_number() {
-  gh pr list --head "$1" --state open --json number --jq '.[0].number // empty'
+  gh pr list --repo "$(repo_slug)" --head "$1" --state open \
+    --json number --jq '.[0].number // empty'
+}
+
+# Head SHA of a PR (base-repo scoped).
+gh_pr_head_sha() {
+  gh pr view "$1" --repo "$(repo_slug)" --json headRefOid --jq .headRefOid
 }
 
 # gh_ship <branch> <parent> <title> <body_file> <draft> <amend_number>
@@ -18,12 +25,12 @@ gh_ship() {
   if [[ -n "$amend_number" ]]; then
     # Keep the title (carries the phase) AND the base in sync — an adopted
     # PR may sit on the wrong base while the ledger records the resolved
-    # stack parent.
-    gh pr edit "$amend_number" --base "$parent" --title "$title" \
-      --body-file "$body_file" >/dev/null ||
+    # stack parent. --repo pins the base repo in fork workflows.
+    gh pr edit "$amend_number" --repo "$(repo_slug)" --base "$parent" \
+      --title "$title" --body-file "$body_file" >/dev/null ||
       die "gh pr edit $amend_number failed"
     local url
-    url="$(gh pr view "$amend_number" --json url --jq .url)"
+    url="$(gh pr view "$amend_number" --repo "$(repo_slug)" --json url --jq .url)"
     printf '%s\t%s\n' "$amend_number" "$url"
     return 0
   fi
@@ -64,11 +71,12 @@ gh_ship() {
 
 # gh_pr_state <number> → JSON {state, mergedAt, baseRefName, headRefOid, isDraft, url}
 gh_pr_state() {
-  gh pr view "$1" --json state,mergedAt,baseRefName,headRefOid,isDraft,url
+  gh pr view "$1" --repo "$(repo_slug)" \
+    --json state,mergedAt,baseRefName,headRefOid,isDraft,url
 }
 
 gh_pr_comment() {
-  gh pr comment "$1" --body "$2" >/dev/null
+  gh pr comment "$1" --repo "$(repo_slug)" --body "$2" >/dev/null
 }
 
 # gh_retarget <number> <new_base> <branch> <old_parent_sha>
@@ -76,16 +84,29 @@ gh_pr_comment() {
 # push with lease, THEN retarget the PR base — a rebase conflict must not
 # leave the PR pointing at a base its branch was never rebased onto. The
 # only force-push in the tool.
+# The remote that owns base branches: upstream in a fork workflow (DW-3),
+# else the push remote.
+gh_base_remote() {
+  if git remote get-url upstream >/dev/null 2>&1; then
+    printf 'upstream\n'
+  else
+    printf '%s\n' "${BMAD_PR_REMOTE:-origin}"
+  fi
+}
+
 gh_retarget() {
   local number=$1 new_base=$2 branch=$3 old_parent_sha=$4
-  local remote="${BMAD_PR_REMOTE:-origin}"
-  git fetch "$remote" >&2
-  git rebase --onto "$remote/$new_base" "$old_parent_sha" "$branch" >&2 || {
+  local remote="${BMAD_PR_REMOTE:-origin}" base_remote
+  # Rebase onto the BASE repo's branch — in a fork workflow the push remote
+  # may not have (or may have a stale) copy of the new base.
+  base_remote="$(gh_base_remote)"
+  git fetch "$base_remote" >&2
+  git rebase --onto "$base_remote/$new_base" "$old_parent_sha" "$branch" >&2 || {
     git rebase --abort >&2 || true
-    refuse "rebase onto $remote/$new_base hit conflicts; resolve manually (git rebase --onto $remote/$new_base $old_parent_sha $branch), then re-run retarget"
+    refuse "rebase onto $base_remote/$new_base hit conflicts; resolve manually (git rebase --onto $base_remote/$new_base $old_parent_sha $branch), then re-run retarget"
   }
   git push --force-with-lease "$remote" "$branch" >&2 ||
     die "git push --force-with-lease failed after retarget"
-  gh pr edit "$number" --base "$new_base" >/dev/null ||
+  gh pr edit "$number" --repo "$(repo_slug)" --base "$new_base" >/dev/null ||
     die "gh pr edit --base $new_base failed (branch already rebased and pushed; re-run retarget)"
 }

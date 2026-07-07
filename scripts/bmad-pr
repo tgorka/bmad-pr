@@ -399,14 +399,16 @@ do_ingest() {
 
   # Fail loud on fetch errors — ingesting "no findings" because an API call
   # failed would green-light a PR nobody actually reviewed.
+  # Head first (also warms the base-repo slug cache for the fork-aware
+  # calls below). An empty head SHA would mean "any commit" to the
+  # score/approval filters — fail loud instead of green-lighting stale
+  # reviewer output.
+  head_sha="$(gh_pr_head_sha "$pr" 2>/dev/null)" ||
+    die "could not fetch the head SHA of PR #$pr (gh auth? network? rate limit?)"
   snapshot="$(checks_snapshot "$pr")"
   [[ "$snapshot" != null ]] ||
     die "could not fetch CI checks for PR #$pr (gh auth? network? rate limit?)"
   failing="$(checks_failing <<<"$snapshot")"
-  # An empty head SHA would mean "any commit" to the score/approval filters
-  # below — fail loud instead of green-lighting stale reviewer output.
-  head_sha="$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null)" ||
-    die "could not fetch the head SHA of PR #$pr (gh auth? network? rate limit?)"
   if [[ "${BMAD_PR_REVIEWER:-none}" != none ]]; then
     backend_query_available ||
       die "reviewer '$BMAD_PR_REVIEWER' is configured but gh is unavailable or unauthenticated — cannot ingest reviewer findings"
@@ -568,7 +570,7 @@ cmd_watch() {
   local deadline timeout head_sha checks_result
   timeout="${BMAD_PR_TIMEOUT:-1800}"
   deadline=$(($(epoch) + timeout))
-  head_sha="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)"
+  head_sha="$(gh_pr_head_sha "$PR_NUMBER")"
 
   log "watching PR #$PR_NUMBER (story $KEY, head ${head_sha:0:7}, timeout ${timeout}s)"
 
@@ -666,7 +668,7 @@ cmd_rereview() {
   fi
 
   local head_sha last_sha state
-  head_sha="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)"
+  head_sha="$(gh_pr_head_sha "$PR_NUMBER")"
   last_sha="$(jq -r '.reviewer.lastReviewedSha // empty' <<<"$ENTRY")"
   state="$(reviewer_check_state "$head_sha")"
 
@@ -718,14 +720,15 @@ cmd_retarget() {
   [[ "$(jq -r '.state' <<<"$parent_state")" == MERGED ]] ||
     refuse "parent PR #$parent_pr is not merged (state: $(jq -r '.state' <<<"$parent_state"))"
   [[ -n "$parent_sha" ]] ||
-    refuse "ledger has no parentSha for $KEY — retarget manually: gh pr edit $PR_NUMBER --base <new-base> && git rebase --onto origin/<new-base> <old-parent-tip> $branch"
+    refuse "ledger has no parentSha for $KEY — retarget manually: gh pr edit $PR_NUMBER --base <new-base> && git rebase --onto $(gh_base_remote)/<new-base> <old-parent-tip> $branch"
   new_base="$(jq -r '.baseRefName' <<<"$parent_state")"
 
   # Everything above is read-only; the rebase + force-push + base edit below
   # are the mutations the dry-run contract must never perform.
   if [[ "$OPT_DRY_RUN" == true ]]; then
-    printf 'plan: rebase %s from %s onto origin/%s, push --force-with-lease, set PR #%s base to %s\n' \
-      "$branch" "${parent_sha:0:7}" "$new_base" "$PR_NUMBER" "$new_base"
+    printf 'plan: rebase %s from %s onto %s/%s, push --force-with-lease to %s, set PR #%s base to %s\n' \
+      "$branch" "${parent_sha:0:7}" "$(gh_base_remote)" "$new_base" \
+      "$BMAD_PR_REMOTE" "$PR_NUMBER" "$new_base"
     return 0
   fi
 
