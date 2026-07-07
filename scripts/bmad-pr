@@ -321,20 +321,26 @@ do_ingest() {
   [[ "$snapshot" != null ]] ||
     die "could not fetch CI checks for PR #$pr (gh auth? network? rate limit?)"
   failing="$(checks_failing <<<"$snapshot")"
-  head_sha="$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null || true)"
+  # An empty head SHA would mean "any commit" to the score/approval filters
+  # below — fail loud instead of green-lighting stale reviewer output.
+  head_sha="$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null)" ||
+    die "could not fetch the head SHA of PR #$pr (gh auth? network? rate limit?)"
   if [[ "${BMAD_PR_REVIEWER:-none}" != none ]]; then
     backend_query_available ||
       die "reviewer '$BMAD_PR_REVIEWER' is configured but gh is unavailable or unauthenticated — cannot ingest reviewer findings"
     threads="$(reviewer_unresolved_threads "$pr")"
-    # Scope the score to the current head — a score for an older revision
-    # must not green-light freshly pushed code.
+    # Scope score and approval to the current head — reviewer output for an
+    # older revision must not green-light freshly pushed code.
     score="$(reviewer_latest_score "$pr" "$head_sha")"
-    approved="$(reviewer_approved "$pr")"
+    approved="$(reviewer_approved "$pr" "$head_sha")"
   fi
 
-  mkdir -p "$(ledger_dir)"
+  local out_dir
+  out_dir="$(ledger_dir)" || exit "$EX_REFUSE"
+  mkdir -p "$out_dir"
+  INGEST_FILE="$(findings_path "$key")" || exit "$EX_REFUSE"
   findings_render "$key" "$pr" "$threads" "$failing" "$score" "$approved" \
-    >"$(findings_path "$key")"
+    >"$INGEST_FILE"
 
   ledger_update "$key" \
     '.reviewer.lastScore = (if $score == "" then null else ($score | tonumber) end)
@@ -362,7 +368,7 @@ ingest_report() {
   local key=$1
   if [[ "$OPT_JSON" == true ]]; then
     jq -n --arg verdict "$INGEST_VERDICT" --arg score "$INGEST_SCORE" \
-      --arg file "$(findings_path "$key")" \
+      --arg file "$INGEST_FILE" \
       --argjson threads "$INGEST_THREADS" --argjson failing "$INGEST_FAILING" \
       --argjson approved "$([[ "$INGEST_APPROVED" == true ]] && echo true || echo false)" \
       '{verdict: $verdict, unresolvedThreads: $threads, failingChecks: $failing,
@@ -370,7 +376,7 @@ ingest_report() {
         approved: $approved, findingsFile: $file}'
   else
     log "verdict: $INGEST_VERDICT (threads: $INGEST_THREADS, failing checks: $INGEST_FAILING, score: ${INGEST_SCORE:-n/a})"
-    log "findings file: $(findings_path "$key")"
+    log "findings file: $INGEST_FILE"
   fi
 }
 
@@ -402,9 +408,11 @@ cmd_status() {
   checks_verdict="$(checks_aggregate <<<"$checks_json")"
   threads='[]' score="" approved=false
   if [[ "${BMAD_PR_REVIEWER:-none}" != none ]]; then
+    local live_head
+    live_head="$(jq -r '.headRefOid // ""' <<<"$live")"
     threads="$(reviewer_unresolved_threads "$PR_NUMBER")"
-    score="$(reviewer_latest_score "$PR_NUMBER" "$(jq -r '.headRefOid // ""' <<<"$live")")"
-    approved="$(reviewer_approved "$PR_NUMBER")"
+    score="$(reviewer_latest_score "$PR_NUMBER" "$live_head")"
+    approved="$(reviewer_approved "$PR_NUMBER" "$live_head")"
   fi
   unresolved="$(jq 'length' <<<"$threads")"
 

@@ -15,8 +15,11 @@ gh_ship() {
   git push -u origin "$branch" >&2 || die "git push failed for $branch"
 
   if [[ -n "$amend_number" ]]; then
-    # Title carries the phase — keep it in sync when amending.
-    gh pr edit "$amend_number" --title "$title" --body-file "$body_file" >/dev/null ||
+    # Keep the title (carries the phase) AND the base in sync — an adopted
+    # PR may sit on the wrong base while the ledger records the resolved
+    # stack parent.
+    gh pr edit "$amend_number" --base "$parent" --title "$title" \
+      --body-file "$body_file" >/dev/null ||
       die "gh pr edit $amend_number failed"
     local url
     url="$(gh pr view "$amend_number" --json url --jq .url)"

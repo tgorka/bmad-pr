@@ -1,7 +1,9 @@
 # shellcheck shell=bash
 # Configuration loading. Precedence: CLI flags (applied by the caller after
 # config_load) > environment variables > _bmad/bmad-pr/config.env > defaults.
-# The config file is flat shell (KEY=value) so no YAML/TOML parsing is needed.
+# The config file is flat KEY=value in the BMAD_PR_* namespace, parsed
+# line-by-line and NEVER executed — a committed config file (which arrives
+# with any checked-out branch) must not be able to run shell.
 
 BMAD_PR_CONFIG_KEYS=(
   BMAD_PR_TOOL              # auto | gt | gh | git
@@ -45,15 +47,26 @@ config_load() {
   local file="${BMAD_PR_CONFIG_FILE:-$root/_bmad/bmad-pr/config.env}"
 
   if [[ -f "$file" ]]; then
-    local key
-    declare -A env_set=()
-    for key in "${BMAD_PR_CONFIG_KEYS[@]}"; do
-      [[ -n "${!key+x}" ]] && env_set[$key]=${!key}
-    done
-    # shellcheck source=/dev/null
-    source "$file"
-    for key in "${!env_set[@]}"; do
-      printf -v "$key" '%s' "${env_set[$key]}"
+    local line key value
+    declare -A file_vals=()
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+      if [[ "$line" =~ ^(BMAD_PR_[A-Z0-9_]+)=(.*)$ ]]; then
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+        # Strip one layer of matching quotes; everything else is literal —
+        # no expansion, no substitution.
+        if [[ "$value" =~ ^\"(.*)\"$ || "$value" =~ ^\'(.*)\'$ ]]; then
+          value="${BASH_REMATCH[1]}"
+        fi
+        file_vals[$key]=$value
+      else
+        warn "ignoring unrecognized line in $file: ${line%%=*}"
+      fi
+    done <"$file"
+    for key in "${!file_vals[@]}"; do
+      # Environment wins over the file.
+      [[ -n "${!key+x}" ]] || printf -v "$key" '%s' "${file_vals[$key]}"
     done
   fi
 
@@ -74,7 +87,12 @@ config_load() {
     refuse "invalid reviewer provider name: '$BMAD_PR_REVIEWER' (expected a token like cubic, generic, none)"
 
   local profile="${LIB_SOURCE_DIR}/reviewers/${BMAD_PR_REVIEWER}.sh"
-  if [[ "$BMAD_PR_REVIEWER" != "none" ]]; then
+  if [[ "$BMAD_PR_REVIEWER" == "none" ]]; then
+    # A provider loaded earlier in this process must not leak its trigger
+    # or bot regex into a run with the reviewer disabled.
+    unset BMAD_PR_REVIEWER_BOT_REGEX BMAD_PR_REVIEWER_CHECK_REGEX \
+      BMAD_PR_REVIEWER_TRIGGER BMAD_PR_REVIEWER_COMPLETION BMAD_PR_SCORE_REGEX
+  else
     if [[ -f "$profile" ]]; then
       # shellcheck source=/dev/null
       source "$profile"

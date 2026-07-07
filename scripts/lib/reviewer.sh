@@ -60,14 +60,17 @@ reviewer_latest_score() {
         end'
 }
 
-# reviewer_approved <pr> → prints true|false
+# reviewer_approved <pr> [head_sha] → prints true|false. Scoped to the
+# current head when given — a stale approval of an older revision must not
+# green-light freshly pushed commits.
 reviewer_approved() {
-  local pr=$1
+  local pr=$1 sha=${2:-}
   reviewer_reviews "$pr" |
-    jq -r --arg bot "$BMAD_PR_REVIEWER_BOT_REGEX" '
+    jq -r --arg bot "$BMAD_PR_REVIEWER_BOT_REGEX" --arg sha "$sha" '
       [ .[]
         | select(.user.type == "Bot")
         | select(.user.login | test($bot; "i"))
+        | select($sha == "" or .commit_id == $sha)
         | select(.state == "APPROVED")
       ] | length > 0'
 }
@@ -121,11 +124,19 @@ reviewer_wait() {
         return 1
       fi
     fi
-    (($(epoch) >= deadline)) && {
+    local now remaining
+    now="$(epoch)"
+    ((now >= deadline)) && {
       printf 'timeout\n'
       return 1
     }
-    sleep "$interval"
+    # Never sleep past the deadline (backoff can exceed the remaining time).
+    remaining=$((deadline - now))
+    if ((interval < remaining)); then
+      sleep "$interval"
+    else
+      sleep "$remaining"
+    fi
     ((interval < 60)) && interval=$((interval * 2))
   done
 }

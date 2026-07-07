@@ -76,11 +76,20 @@ checks_wait() {
         }
         ;;
     esac
-    (($(epoch) >= deadline)) && {
+    local now remaining
+    now="$(epoch)"
+    ((now >= deadline)) && {
       printf 'pending\n'
       return 1
     }
-    sleep "$interval"
+    # Never sleep past the deadline — the backoff interval can exceed the
+    # remaining time budget.
+    remaining=$((deadline - now))
+    if ((interval < remaining)); then
+      sleep "$interval"
+    else
+      sleep "$remaining"
+    fi
     ((interval < 60)) && interval=$((interval * 2))
   done
 }

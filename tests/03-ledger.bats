@@ -118,6 +118,22 @@ new_entry() { # key branch parent_branch parent_pr number openedAt
   [[ "$output" == *"repo-relative"* ]]
 }
 
+@test "ledger_read propagates the ledger_dir refusal through substitutions" {
+  export BMAD_PR_LEDGER_DIR='../outside'
+  run ledger_read 3.2
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"repo-relative"* ]]
+}
+
+@test "newest_open refuses when an entry lacks pr.state" {
+  new_entry 3.1 bmad/story/3.1 "" "" 40 2026-07-01T10:00:00Z
+  echo '{"schema": 1, "story": "9.9", "branch": "bmad/story/9.9"}' \
+    >"$REPO/_bmad-output/pr/zz.json"
+  run ledger_newest_open 3.3
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"malformed ledger files"* ]]
+}
+
 @test "keys are sanitized in filenames" {
   new_entry 'evil/../key' bmad/story/x "" "" 7 2026-07-01T10:00:00Z
   [ -f "$REPO/_bmad-output/pr/evil-..-key.json" ]

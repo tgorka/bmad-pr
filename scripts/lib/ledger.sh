@@ -13,31 +13,41 @@ ledger_dir() {
   printf '%s/%s' "$(repo_root)" "$BMAD_PR_LEDGER_DIR"
 }
 
+# ledger_dir's refusal happens inside command substitutions — every caller
+# below captures first and propagates the failure so the traversal guard is
+# effective even without config_load's authoritative check.
 ledger_path() {
-  printf '%s/%s.json' "$(ledger_dir)" "$(sanitize_key "$1")"
+  local dir
+  dir="$(ledger_dir)" || return $?
+  printf '%s/%s.json' "$dir" "$(sanitize_key "$1")"
 }
 
-# Print the ledger JSON for a key. Returns 1 (silently) when absent.
+# Print the ledger JSON for a key. Returns 1 (silently) when absent, >1 on
+# refusal (malformed ledger / invalid ledger dir).
 ledger_read() {
   local path
-  path="$(ledger_path "$1")"
+  path="$(ledger_path "$1")" || return $?
   [[ -f "$path" ]] || return 1
-  jq -e '.schema == 1 and (.story | type == "string") and (.branch | type == "string")' \
+  jq -e '.schema == 1 and (.story | type == "string")
+         and (.branch | type == "string") and (.pr.state | type == "string")' \
     "$path" >/dev/null 2>&1 ||
     refuse "malformed ledger: $path (fix or remove it, then re-run)"
   cat "$path"
 }
 
 # Write ledger JSON (stdin) for a key, atomically, validating first.
+# mktemp creates the temp file safely (no pre-planted symlink can redirect
+# the write outside the repo).
 ledger_write() {
   local key=$1 path tmp
-  path="$(ledger_path "$key")"
+  path="$(ledger_path "$key")" || exit "$EX_REFUSE"
   mkdir -p "$(dirname "$path")"
-  tmp="$path.tmp.$$"
+  tmp="$(mktemp "$path.tmp.XXXXXX")" || die "mktemp failed for ledger write"
   cat >"$tmp"
   # Same shape validation as ledger_read — never persist what read would
   # later refuse.
-  if ! jq -e '.schema == 1 and (.story | type == "string") and (.branch | type == "string")' \
+  if ! jq -e '.schema == 1 and (.story | type == "string")
+              and (.branch | type == "string") and (.pr.state | type == "string")' \
     "$tmp" >/dev/null 2>&1; then
     rm -f "$tmp"
     die "internal: refusing to write invalid ledger JSON for $key"
@@ -52,7 +62,7 @@ ledger_newest_open() {
   local exclude
   exclude="$(sanitize_key "${1:-}")"
   local dir
-  dir="$(ledger_dir)"
+  dir="$(ledger_dir)" || return $?
   [[ -d "$dir" ]] || return 1
   local -a files=("$dir"/*.json)
   [[ -e "${files[0]}" ]] || return 1
@@ -64,7 +74,8 @@ ledger_newest_open() {
   out="$(jq -s --arg ex "$exclude" '
     if any(.[]; (.schema != 1)
               or ((.story | type) != "string")
-              or ((.branch | type) != "string"))
+              or ((.branch | type) != "string")
+              or ((.pr.state | type) != "string"))
     then error("entry without required ledger shape")
     else
       [ .[]

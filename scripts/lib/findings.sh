@@ -5,7 +5,9 @@
 # --resolve-addressed` can resolve exactly the checked-off threads.
 
 findings_path() {
-  printf '%s/%s-findings.md' "$(ledger_dir)" "$(sanitize_key "$1")"
+  local dir
+  dir="$(ledger_dir)" || return $?
+  printf '%s/%s-findings.md' "$dir" "$(sanitize_key "$1")"
 }
 
 # findings_render <key> <pr_number> <threads_json> <failing_checks_json>

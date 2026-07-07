@@ -101,7 +101,8 @@ write_ledger() { # key branch parent_branch parent_pr number state openedAt
   export GH_STUB_OPEN_PR=77
   run "$BMAD_PR_BIN" ship --story 3.2 --phase dev-story
   [ "$status" -eq 0 ]
-  gh_called "pr edit 77"
+  # adopted PR gets its base synced to the resolved stack parent
+  gh_called "pr edit 77" "--base main"
   gh_not_called "pr create"
   [ "$(jq -r '.pr.number' "$REPO/_bmad-output/pr/3.2.json")" = "77" ]
 }

@@ -80,3 +80,35 @@ setup() {
   BMAD_PR_REVIEWER=none config_load "$ROOT"
   [ -z "${BMAD_PR_REVIEWER_TRIGGER:-}" ]
 }
+
+@test "config file is parsed, never executed" {
+  mkdir -p "$ROOT/_bmad/bmad-pr"
+  marker="$BATS_TEST_TMPDIR/pwned"
+  printf 'BMAD_PR_TRUNK=$(touch %s)\nPATH=/evil\n' "$marker" \
+    >"$ROOT/_bmad/bmad-pr/config.env"
+  config_load "$ROOT" 2>/dev/null
+  [ ! -e "$marker" ]
+  [ "$BMAD_PR_TRUNK" = "\$(touch $marker)" ]
+  [[ "$PATH" != /evil* ]]
+}
+
+@test "config file lines outside BMAD_PR_* are ignored with a warning" {
+  mkdir -p "$ROOT/_bmad/bmad-pr"
+  printf 'SOME_OTHER=1\nBMAD_PR_TRUNK=develop\n' >"$ROOT/_bmad/bmad-pr/config.env"
+  run bash -c "
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/config.sh'
+    export LIB_SOURCE_DIR='$LIB_DIR'
+    config_load '$ROOT' && printf '%s\n' \"\$BMAD_PR_TRUNK\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ignoring unrecognized line"* ]]
+  [[ "$output" == *"develop"* ]]
+}
+
+@test "reviewer none clears previously loaded provider settings" {
+  config_load "$ROOT" # loads the cubic profile
+  [ -n "$BMAD_PR_REVIEWER_TRIGGER" ]
+  BMAD_PR_REVIEWER=none
+  config_load "$ROOT"
+  [ -z "${BMAD_PR_REVIEWER_TRIGGER:-}" ]
+  [ -z "${BMAD_PR_REVIEWER_BOT_REGEX:-}" ]
+}

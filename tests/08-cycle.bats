@@ -73,9 +73,8 @@ set_reviewed() { # sha
 
 @test "watch: reviewer never appears → exit 6 (absent)" {
   export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
-  # no check run ever; shrink the grace window via a tiny timeout
-  export BMAD_PR_TIMEOUT=2
-  run timeout 200 "$BMAD_PR_BIN" watch --story 3.2 --timeout 2
+  # no cubic check run ever registers; the tiny --timeout bounds the grace
+  run "$BMAD_PR_BIN" watch --story 3.2 --timeout 2
   [ "$status" -eq 5 ] || [ "$status" -eq 6 ]
 }
 
@@ -144,13 +143,15 @@ EOF
   [ "$(git rev-list --count '@{u}..HEAD')" = "0" ]
 }
 
-@test "watch: score for an older commit is stale and does not count" {
+@test "watch: score and approval for an older commit are stale and don't count" {
   export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
   export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic","status":"completed"}]}'
-  export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T10:00:00Z","commit_id":"olderolderolderolderolderolderolderolder","body":"PR score: 10/10"}]'
+  export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"APPROVED","submitted_at":"2026-07-06T10:00:00Z","commit_id":"olderolderolderolderolderolderolderolder","body":"PR score: 10/10"}]'
   run "$BMAD_PR_BIN" watch --story 3.2
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.reviewer.lastScore' "$REPO/_bmad-output/pr/3.2.json")" = "null" ]
+  entry="$REPO/_bmad-output/pr/3.2.json"
+  [ "$(jq -r '.reviewer.lastScore' "$entry")" = "null" ]
+  [ "$(jq -r '.reviewer.approved' "$entry")" = "false" ]
 }
 
 @test "rereview refuses from the wrong branch" {
