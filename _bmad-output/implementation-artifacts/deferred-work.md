@@ -1,94 +1,123 @@
 # Deferred Work
 
-Items split out of `spec-bmad-pr-core-and-ledger.md` (G1+G3) during
-quick-dev step-01 routing on 2026-05-17. Each one becomes its own
-spec when scheduled.
+Canonical ledger (bmad DW format). Triaged 2026-07-07 against the v1.0.0
+plugin rewrite (PR #11, tag `v1.0.0`); the pre-rewrite v0 ledger and its
+resolutions are recorded at the bottom for audit.
 
-Source: `_bmad-output/planning-artifacts/bmad-brainstorming.md`
-("Synthesized v1 Architecture").
+### DW-1: PR body template engine (v0 goal G6)
 
-## G2 — Git safety preflight (CH1–CH5)
+origin: v0 brainstorming G6, carried through the v1 rewrite, 2026-07-07
+location: scripts/bmad-pr build_body_file
+severity: medium
+reason: v1 ships a fixed body (summary + artifact link + Stacked-on + BMAD-Run-Id
+  trailer). Templates (`.github/bmad-pr-template.md` placeholders), phase emoji,
+  Conventional-Commits titles, label maps and Linear/Jira auto-links are polish
+  that should wait for real usage feedback.
+status: open
 
-Standalone validator with `--auto-fix`. Detects and refuses on:
+### DW-2: Planning-phase stacks (bmad/planning/<phase>)
 
-- CH1 detached HEAD (auto-fix: branch from current HEAD)
-- CH2 mid-rebase / mid-merge (no auto-fix; user resolves)
-- CH3 dirty working tree, unrelated changes (auto-fix: stage only
-  `_bmad-output/` paths)
-- CH4 stacked-PR mid-rebase, gt-specific (no auto-fix; `gt restack`)
-- CH5 force-pushed remote / amend race (auto-fix: `git pull --rebase`)
+origin: v0 decision D1 (per-phase PRs for planning artifacts), 2026-07-07
+location: scripts/bmad-pr cmd_ship branch policy
+severity: medium
+reason: v1 implements story stacks only (`bmad/story/<key>`). Planning phases
+  currently ship like any other story key; dedicated planning-stack semantics
+  (one PR per planning phase, stacked) need D1's design carried over.
+status: open
 
-Refusal contract per BMAD AR22: single-line actionable hint, `--auto-fix`
-offered where safe, never touches non-BMAD files, never force-pushes,
-never resolves merge conflicts.
+### DW-3: Multi-remote target selection (fork-and-upstream)
 
-Depends on: nothing. Consumed by: G1 PR-creation path.
+origin: v0 review defer gh-pr-create-explicit-target + CH9, 2026-07-07
+location: scripts/lib/backend-*.sh (origin hardcoded)
+severity: medium
+reason: v1 always passes explicit --base/--head but assumes the `origin`
+  remote. Fork workflows need a `BMAD_PR_TARGET_REMOTE` (prefer `upstream`
+  when present) and a base-repo flag for gh.
+status: open
 
-## G4 — Stacked-PR (gt) integration
+### DW-4: CH4 detector — gt mid-restack state
 
-- Branch patterns: `bmad/planning/<phase>` and `bmad/story/<epic>.<story>`
-- gt stack-aware amend (push new commit, refresh body, no history rewrite)
-- Prior-phase PR link block in body (C4)
-- Planning stack vs story stack semantics from brainstorming D1
+origin: v0 chaos item CH4, 2026-07-07
+location: scripts/lib/backend-gt.sh
+severity: low
+reason: v1 relies on gt's own failure messages when a stack is mid-restack.
+  A preflight detector (parse `gt log` / rebase state) would refuse earlier
+  with a cleaner hint.
+status: open
 
-Depends on: G1 (PR creation), G3 (ledger lookup), G2 (mid-rebase refuse).
+### DW-5: Durable ledger writes (fsync before rename)
 
-## G5 — /bmad-next autoPR hook + config schema
+origin: v0 review defer crash-durable-ledger-write, 2026-07-07
+location: scripts/lib/ledger.sh ledger_write
+severity: low
+reason: mktemp + mv is atomic on one filesystem but not durable across power
+  loss. bash has no portable fsync; would need `sync -f` (coreutils ≥ 8.24)
+  or a tiny helper. Couples with DW-6.
+status: open
 
-- `pr:` block in `bmad-stepper.config.yaml` (tool, autoPR, draftByDefault,
-  targetRemote, template, emojiByPhase, labelMap, branchPattern,
-  linearIssueKey)
-- Non-blocking hook call from `/bmad-next` post-promotion
-- Retry semantics on hook failure; loop does not crash
+### DW-6: Concurrent-invocation file lock (CH14)
 
-Depends on: G1. Touches bmad-stepper (out-of-repo dependency).
+origin: v0 chaos item CH14, 2026-07-07
+location: scripts/lib/ledger.sh
+severity: low
+reason: two bmad-pr processes (parallel worktrees) can interleave
+  read-modify-write on the same ledger file. flock(1) around ledger_update
+  would close it; rare in practice because keys are per-story.
+status: open
 
-## G6 — PR body template engine
+### DW-7: Offline/rate-limit queueing (D6/CH7)
 
-- `.github/bmad-pr-template.md` with handlebars-style placeholders
-- Phase emoji prefix (S4): 🧠 brainstorm, 📋 prd, 🏗️ architecture,
-  🎨 ux, 📝 stories, 💻 dev-story
-- Conventional Commits PR titles (A1)
-- Label map per phase (C2)
-- `BMAD-Run-Id: <runId>` Gerrit-style trailer (A5)
-- Linear/Jira issue auto-link via config (A4)
+origin: v0 decision D6, 2026-07-07
+location: scripts/bmad-pr (ship/rereview network paths)
+severity: low
+reason: v1 fails fast on network errors (loudly, never green). A
+  `pr-status: queued` marker + drain-on-next-run was designed in v0 but adds
+  state complexity disproportionate to current need.
+status: open
 
-Depends on: G1.
+### DW-8: CH3 staging granularity
 
-## Review-surfaced defers (from G2 preflight review pass)
+origin: v0 review defer, 2026-07-07
+location: scripts/lib/preflight.sh preflight_ch3_fix
+severity: low
+reason: `git add -- $scope` stages every untracked + modified path under the
+  scope, including files the user has not reviewed. `git add -u` (tracked
+  only) is stricter but would skip new BMAD artifacts. Current wide behavior
+  is documented; revisit with usage feedback.
+status: open
 
-- **CH3 staging granularity** — `git add _bmad-output/` stages every untracked + modified path under that tree, including ones the user has not yet reviewed. Consider `git add -u _bmad-output/` (only tracked modifications) or document the wider behavior. Currently documented in SKILL.md.
-- **CH1 race / `--trunk-branch HEAD`** — if the user sets `--trunk-branch HEAD`, the CLI refuses on the trunk check before CH1 ever runs. Currently surfaces a misleading trunk-refusal message. Tiny.
-- **CH1 + CH3 retry hints when auto-fix is in flight** — when a post-fix CH5/CH3 surfaces, the user sees the detector's "Try: bmad-pr --auto-fix" hint despite already passing the flag. Partially patched (suffix is stripped); double-check after G4 lands.
-- **`Date.now()` for CH1 auto-fix branch suffix** — not injectable via the CLI's `now` injector. Collision risk is real only for sub-second double-invocation. Defer.
-- **Pre-existing CH3 staging of unreviewed files** — see "CH3 staging granularity" above.
-- **Quoted-path corner cases under `-z`** — the new `-z` parser handles NUL framing correctly. The `unquote` helper was removed; if a future code path adds back human-readable porcelain parsing, restore the C-quote decoder.
+### DW-9: CH1 auto-fix branch-name collision window
 
-## Review-surfaced defers (from G1+G3 review pass)
+origin: v0 review defer (Date.now suffix), 2026-07-07
+location: scripts/lib/preflight.sh preflight_ch1_fix
+severity: low
+reason: branch suffix uses epoch seconds; sub-second double invocation could
+  collide. Accepted risk — git refuses the duplicate branch, nothing corrupts.
+status: open
 
-These were found during step-04 review of the G1+G3 slice. Not blockers
-for that slice; each should be a follow-up spec.
+---
 
-- **gh-pr-create-explicit-target** — `gh pr create` is invoked without
-  `--head`/`--base`/`--repo`. Multi-remote checkouts (fork-and-upstream)
-  open the PR against the wrong base or fork with no diagnostic. Add
-  configurable `pr.targetRemote` and a base-detection helper.
-- **closed-merged-ledger-handling** — `findEntry` only matches
-  `status: open`. If a closed or merged entry already exists for a
-  `{story, phase}`, re-running silently opens a second PR. Decide: refuse
-  with hint, or auto-link to the prior PR.
-- **crash-durable-ledger-write** — `Bun.write(tmp)` + `renameSync` is
-  atomic on same-filesystem but not durable across power loss. Add an
-  `fsync` (or `Bun.file(tmp).flush()` if Bun gains it) before the
-  rename. Couples naturally with CH14 file-lock work.
+## Resolved by the v1.0.0 rewrite (v0 ledger audit)
 
-## Open questions deferred to brief/PRD
-
-Per brainstorming "Open Questions Deferred to Brief / PRD":
-
-- Mono-repo precedence (multiple AGENT.md): directory proximity vs
-  lexical?
-- gh App vs user token (auth + rate-limit implications)
-- Signed commits: propagate `--gpg-sign` from repo policy?
-- CI status reporter (C3): GitHub Checks API only, or generic?
-- CH6–CH14 v1.x roadmap timing
+- **G2 git-safety preflight (CH1/CH2/CH3/CH5)** — done; ported with bounded
+  `--auto-fix`, dry-run-never-mutates, worktree-safe CH2.
+- **G4 stacked-PR gt integration** — done (gt backend: `track --parent`,
+  `submit --no-interactive`, `gt sync` retarget); prior-phase PR link in
+  body (C4) done via `Stacked on: #N`.
+- **G5 autoPR hook + config schema** — superseded: placement now via
+  `workflow.on_complete` overrides (quick-dev, dev-auto) + bmad-loop
+  `pre_commit_gate` plugin; config via `_bmad/bmad-pr/config.env`
+  (parsed, never sourced). The bmad-stepper-specific hook is out of scope.
+- **closed-merged-ledger-handling** — done: ship refuses on a merged/closed
+  entry with a removal hint.
+- **CH12 existing-PR duplicate** — done: ship adopts an open PR for the
+  branch (and syncs its base).
+- **CH1-before-trunk-check message confusion** — resolved by design:
+  preflight runs before branch policy in v1.
+- **auto-fix retry-hint duplication** — resolved: post-fix failures use the
+  plain message without the `--auto-fix` suffix.
+- **quoted-path corner cases** — moot: v1 parses NUL-framed porcelain only.
+- **`BMAD-Run-Id` trailer (A5)** — done (fixed body).
+- **Open questions (auth model, signed commits, CI reporter scope,
+  mono-repo AGENT.md precedence)** — remain product-brief questions, not
+  implementation defers; tracked in planning artifacts.
