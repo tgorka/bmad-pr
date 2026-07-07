@@ -11,6 +11,7 @@ setup() {
   add_origin "$REPO" >/dev/null
   cd "$REPO"
   export BMAD_PR_TOOL=gh BMAD_PR_REVIEWER=cubic BMAD_PR_POLL_INTERVAL=1
+  export BMAD_PR_REGISTER_GRACE=1
   git switch -qc bmad/story/3.2
   git commit -q --allow-empty -m "story work"
   git push -qu origin bmad/story/3.2
@@ -36,7 +37,7 @@ set_reviewed() { # sha
 @test "watch: green checks + completed clean review → exit 0" {
   export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
   export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic — AI code review","status":"completed"}]}'
-  export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T10:00:00Z","body":"PR score: 9/10\nLooks good."}]'
+  export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T10:00:00Z","commit_id":"'"$HEAD_SHA"'","body":"PR score: 9/10\nLooks good."}]'
   run "$BMAD_PR_BIN" watch --story 3.2
   [ "$status" -eq 0 ]
   entry="$REPO/_bmad-output/pr/3.2.json"
@@ -64,7 +65,7 @@ set_reviewed() { # sha
 @test "watch: completed review with score below threshold → exit 3" {
   export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
   export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic","status":"completed"}]}'
-  export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T10:00:00Z","body":"PR score: 5/10"}]'
+  export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T10:00:00Z","commit_id":"'"$HEAD_SHA"'","body":"PR score: 5/10"}]'
   run "$BMAD_PR_BIN" watch --story 3.2
   [ "$status" -eq 3 ]
   [ "$(jq -r '.reviewer.lastScore' "$REPO/_bmad-output/pr/3.2.json")" = "5" ]
@@ -80,7 +81,7 @@ set_reviewed() { # sha
 
 @test "ingest standalone writes findings and exits with verdict" {
   export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
-  export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"APPROVED","submitted_at":"2026-07-06T10:00:00Z","body":"PR score: 10/10"}]'
+  export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"APPROVED","submitted_at":"2026-07-06T10:00:00Z","commit_id":"'"$HEAD_SHA"'","body":"PR score: 10/10"}]'
   run "$BMAD_PR_BIN" ingest --story 3.2 --json
   [ "$status" -eq 0 ]
   [ "$(jq -r '.verdict' <<<"$output")" = "green" ]
@@ -141,6 +142,24 @@ EOF
   run "$BMAD_PR_BIN" rereview --story 3.2
   [ "$status" -eq 0 ]
   [ "$(git rev-list --count '@{u}..HEAD')" = "0" ]
+}
+
+@test "watch: score for an older commit is stale and does not count" {
+  export GH_STUB_CHECKS='[{"name":"ci","bucket":"pass"}]'
+  export GH_STUB_CHECKRUNS='{"check_runs":[{"name":"cubic","status":"completed"}]}'
+  export GH_STUB_REVIEWS='[{"user":{"login":"cubic-dev-ai[bot]","type":"Bot"},"state":"COMMENTED","submitted_at":"2026-07-06T10:00:00Z","commit_id":"olderolderolderolderolderolderolderolder","body":"PR score: 10/10"}]'
+  run "$BMAD_PR_BIN" watch --story 3.2
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.reviewer.lastScore' "$REPO/_bmad-output/pr/3.2.json")" = "null" ]
+}
+
+@test "rereview refuses from the wrong branch" {
+  git switch -qc feature/elsewhere
+  git commit -q --allow-empty -m "unrelated"
+  run "$BMAD_PR_BIN" rereview --story 3.2
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"belongs to branch bmad/story/3.2"* ]]
+  gh_not_called "pr comment"
 }
 
 @test "watch refuses when ledger has no PR number" {

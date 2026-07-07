@@ -111,8 +111,14 @@ require_story() {
   [[ -n "$KEY" ]] || refuse "invalid --story key"
 }
 
+# ledger_read runs in a command substitution, so its refusal on a malformed
+# ledger cannot abort us directly — distinguish rc 1 (absent) from rc>1
+# (refusal/error, already printed to stderr) and propagate the latter.
 require_entry() {
-  ENTRY="$(ledger_read "$KEY")" ||
+  local rc=0
+  ENTRY="$(ledger_read "$KEY")" || rc=$?
+  ((rc > 1)) && exit "$rc"
+  ((rc == 1)) &&
     refuse "no ledger entry for story $KEY — run: bmad-pr ship --story $KEY --phase <phase>"
   PR_NUMBER="$(jq -r '.pr.number // empty' <<<"$ENTRY")"
 }
@@ -159,8 +165,11 @@ cmd_ship() {
   preflight_run "$OPT_AUTO_FIX" "$OPT_DRY_RUN"
 
   # Existing entry → amend path (never re-create; v0 decision D3/CH12).
-  local entry="" amend_number="" run_id
-  if entry="$(ledger_read "$KEY")"; then
+  # A malformed own ledger (rc>1) must stop for repair, not read as missing.
+  local entry="" amend_number="" run_id entry_rc=0
+  entry="$(ledger_read "$KEY")" || entry_rc=$?
+  ((entry_rc > 1)) && exit "$entry_rc"
+  if ((entry_rc == 0)); then
     local state
     state="$(jq -r '.pr.state' <<<"$entry")"
     if [[ "$state" == open ]]; then
@@ -183,12 +192,17 @@ cmd_ship() {
     parent_pr="$(jq -r '.parentPr // empty' <<<"$entry")"
     [[ -z "$parent_branch" ]] && parent_branch=$BMAD_PR_TRUNK
   else
-    local prev
-    if prev="$(ledger_newest_open "$KEY")"; then
+    # rc 1 = genuinely no open parent → trunk. rc>1 = corrupt ledger state
+    # (refusal already printed) → propagate instead of silently de-stacking.
+    local prev prev_rc=0
+    prev="$(ledger_newest_open "$KEY")" || prev_rc=$?
+    if ((prev_rc == 0)); then
       parent_branch="$(jq -r '.branch' <<<"$prev")"
       parent_pr="$(jq -r '.pr.number // empty' <<<"$prev")"
-    else
+    elif ((prev_rc == 1)); then
       parent_branch=$BMAD_PR_TRUNK
+    else
+      exit "$prev_rc"
     fi
   fi
 
@@ -307,14 +321,16 @@ do_ingest() {
   [[ "$snapshot" != null ]] ||
     die "could not fetch CI checks for PR #$pr (gh auth? network? rate limit?)"
   failing="$(checks_failing <<<"$snapshot")"
+  head_sha="$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null || true)"
   if [[ "${BMAD_PR_REVIEWER:-none}" != none ]]; then
     backend_query_available ||
       die "reviewer '$BMAD_PR_REVIEWER' is configured but gh is unavailable or unauthenticated — cannot ingest reviewer findings"
     threads="$(reviewer_unresolved_threads "$pr")"
-    score="$(reviewer_latest_score "$pr")"
+    # Scope the score to the current head — a score for an older revision
+    # must not green-light freshly pushed code.
+    score="$(reviewer_latest_score "$pr" "$head_sha")"
     approved="$(reviewer_approved "$pr")"
   fi
-  head_sha="$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null || true)"
 
   mkdir -p "$(ledger_dir)"
   findings_render "$key" "$pr" "$threads" "$failing" "$score" "$approved" \
@@ -387,7 +403,7 @@ cmd_status() {
   threads='[]' score="" approved=false
   if [[ "${BMAD_PR_REVIEWER:-none}" != none ]]; then
     threads="$(reviewer_unresolved_threads "$PR_NUMBER")"
-    score="$(reviewer_latest_score "$PR_NUMBER")"
+    score="$(reviewer_latest_score "$PR_NUMBER" "$(jq -r '.headRefOid // ""' <<<"$live")")"
     approved="$(reviewer_approved "$PR_NUMBER")"
   fi
   unresolved="$(jq 'length' <<<"$threads")"
@@ -483,6 +499,15 @@ cmd_rereview() {
   require_pr_number
   [[ "${BMAD_PR_REVIEWER:-none}" != none ]] ||
     refuse "no reviewer configured (BMAD_PR_REVIEWER=none)"
+
+  # Same branch guard as ship: rereview pushes the CURRENT branch — from the
+  # wrong branch it would push unrelated commits and prod the reviewer
+  # without the intended fixes.
+  local ledger_branch cur
+  ledger_branch="$(jq -r '.branch' <<<"$ENTRY")"
+  cur="$(current_branch)"
+  [[ "$cur" == "$ledger_branch" ]] ||
+    refuse "story $KEY belongs to branch $ledger_branch but you are on $cur — switch branches first"
 
   local resolved=0
   if [[ "$OPT_RESOLVE_ADDRESSED" == true ]]; then

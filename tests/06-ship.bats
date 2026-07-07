@@ -135,6 +135,25 @@ write_ledger() { # key branch parent_branch parent_pr number state openedAt
   [[ "$output" == *"belongs to branch bmad/story/3.2"* ]]
 }
 
+@test "ship refuses when another ledger file is corrupt (no silent de-stack)" {
+  mkdir -p "$REPO/_bmad-output/pr"
+  echo '{broken' >"$REPO/_bmad-output/pr/zz.json"
+  run "$BMAD_PR_BIN" ship --story 3.2 --phase dev-story --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"malformed ledger files"* ]]
+  gh_not_called "pr create"
+}
+
+@test "ship refuses when the story's own ledger is corrupt" {
+  git switch -qc bmad/story/3.2
+  mkdir -p "$REPO/_bmad-output/pr"
+  echo '{broken' >"$REPO/_bmad-output/pr/3.2.json"
+  run "$BMAD_PR_BIN" ship --story 3.2 --phase dev-story
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"malformed ledger"* ]]
+  gh_not_called "pr create"
+}
+
 @test "ship without required flags refuses" {
   run "$BMAD_PR_BIN" ship --phase dev-story
   [ "$status" -eq 2 ]

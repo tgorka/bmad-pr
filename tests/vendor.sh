@@ -4,6 +4,7 @@
 set -euo pipefail
 
 BATS_VERSION="${BATS_VERSION:-1.11.1}"
+BATS_VERSION="${BATS_VERSION#v}" # tolerate a v-prefixed override (v1.11.1)
 # sha256 of the pinned release tarball; override together with BATS_VERSION.
 BATS_SHA256="${BATS_SHA256:-5c57ed9616b78f7fd8c553b9bae3c7c9870119edd727ec17dbd1185c599f79d9}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

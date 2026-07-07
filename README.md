@@ -5,7 +5,7 @@ plugin that closes the gap between BMAD review sessions and GitHub:
 
 - **Ships** each story as a **draft PR stacked on the previous story's PR**
   — natively via [Graphite](https://graphite.com) (`gt`), emulated via `gh`
-  (explicit `--base`), or bare `git` as a last resort.
+  (explicit `--base`/`--head`), or bare `git` as a last resort.
 - **Watches** pre-submit CI checks and external AI reviewers
   ([cubic.dev](https://cubic.dev) built in; CodeRabbit/Greptile via the
   `generic` provider).

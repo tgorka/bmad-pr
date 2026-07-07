@@ -57,17 +57,23 @@ ledger_newest_open() {
   local -a files=("$dir"/*.json)
   [[ -e "${files[0]}" ]] || return 1
   local out
-  # A jq parse failure must refuse, not read as "no open parent" — silently
-  # de-stacking onto trunk because one ledger file is corrupt would be worse
-  # than stopping.
+  # Corrupt ledger state must refuse, not read as "no open parent" —
+  # silently de-stacking onto trunk would be worse than stopping. That
+  # covers both unparseable JSON (jq -s fails) and parseable files that
+  # don't have the required ledger shape (jq error() below).
   out="$(jq -s --arg ex "$exclude" '
-    [ .[]
-      | select(.schema == 1)
-      | select((.story // "" | gsub("[^A-Za-z0-9._-]"; "-")) != $ex)
-      | select(.pr.state == "open")
-    ] | sort_by(.openedAt) | last // empty
+    if any(.[]; (.schema != 1)
+              or ((.story | type) != "string")
+              or ((.branch | type) != "string"))
+    then error("entry without required ledger shape")
+    else
+      [ .[]
+        | select((.story | gsub("[^A-Za-z0-9._-]"; "-")) != $ex)
+        | select(.pr.state == "open")
+      ] | sort_by(.openedAt) | last // empty
+    end
   ' "${files[@]}")" ||
-    refuse "could not parse ledger files in $dir — fix or remove the malformed JSON, then re-run"
+    refuse "malformed ledger files in $dir — fix or remove them, then re-run"
   [[ -n "$out" ]] || return 1
   printf '%s\n' "$out"
 }

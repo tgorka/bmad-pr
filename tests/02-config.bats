@@ -58,6 +58,15 @@ setup() {
   [[ "$output" == *"BMAD_PR_REVIEWER_BOT_REGEX"* ]]
 }
 
+@test "reviewer provider with path separators refuses cleanly" {
+  run bash -c "
+    source '$LIB_DIR/common.sh'; source '$LIB_DIR/config.sh'
+    export LIB_SOURCE_DIR='$LIB_DIR'
+    BMAD_PR_REVIEWER='../../evil' config_load '$ROOT'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"invalid reviewer provider name"* ]]
+}
+
 @test "unknown reviewer provider refuses" {
   run bash -c "
     source '$LIB_DIR/common.sh'; source '$LIB_DIR/config.sh'

@@ -43,7 +43,8 @@ checks_failing() {
 checks_wait() {
   local pr=$1 timeout=$2
   local deadline=$(($(epoch) + timeout))
-  local grace_deadline=$(($(epoch) + 90))
+  local grace="${BMAD_PR_REGISTER_GRACE:-90}"
+  local grace_deadline=$(($(epoch) + grace))
   ((grace_deadline > deadline)) && grace_deadline=$deadline
   local interval="${BMAD_PR_POLL_INTERVAL:-15}"
   local agg snapshot null_streak=0
@@ -59,16 +60,20 @@ checks_wait() {
     fi
     agg="$(checks_aggregate <<<"$snapshot")"
     case "$agg" in
-      none)
+      pending) ;;
+      fail)
+        printf 'fail\n'
+        return 0
+        ;;
+      none | pass)
+        # Check suites register one by one for a few seconds after push —
+        # neither "no checks" nor "all green so far" is trustworthy until
+        # the registration grace window has elapsed. Failures are terminal
+        # immediately.
         (($(epoch) >= grace_deadline)) && {
-          printf 'none\n'
+          printf '%s\n' "$agg"
           return 0
         }
-        ;;
-      pending) ;;
-      *)
-        printf '%s\n' "$agg"
-        return 0
         ;;
     esac
     (($(epoch) >= deadline)) && {

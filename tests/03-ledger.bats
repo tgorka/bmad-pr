@@ -76,7 +76,15 @@ new_entry() { # key branch parent_branch parent_pr number openedAt
   echo '{broken' >"$REPO/_bmad-output/pr/zz.json"
   run ledger_newest_open 3.3
   [ "$status" -eq 2 ]
-  [[ "$output" == *"could not parse ledger files"* ]]
+  [[ "$output" == *"malformed ledger files"* ]]
+}
+
+@test "newest_open refuses on valid JSON without the ledger shape" {
+  new_entry 3.1 bmad/story/3.1 "" "" 40 2026-07-01T10:00:00Z
+  echo '{"schema": 1, "story": 3}' >"$REPO/_bmad-output/pr/zz.json"
+  run ledger_newest_open 3.3
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"malformed ledger files"* ]]
 }
 
 @test "ledger_write rejects entries missing required fields" {

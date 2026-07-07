@@ -40,15 +40,19 @@ reviewer_reviews() {
   jq -s 'add // []' <<<"$out"
 }
 
-# reviewer_latest_score <pr> → the captured score number, or empty.
+# reviewer_latest_score <pr> [head_sha] → the captured score number, or
+# empty. When head_sha is given, only reviews of that commit count — a
+# score from an earlier revision must not green-light freshly pushed code.
 reviewer_latest_score() {
-  local pr=$1
+  local pr=$1 sha=${2:-}
   [[ -n "${BMAD_PR_SCORE_REGEX:-}" ]] || return 0
   reviewer_reviews "$pr" |
-    jq -r --arg bot "$BMAD_PR_REVIEWER_BOT_REGEX" --arg re "$BMAD_PR_SCORE_REGEX" '
+    jq -r --arg bot "$BMAD_PR_REVIEWER_BOT_REGEX" --arg re "$BMAD_PR_SCORE_REGEX" \
+      --arg sha "$sha" '
       [ .[]
         | select(.user.type == "Bot")
         | select(.user.login | test($bot; "i"))
+        | select($sha == "" or .commit_id == $sha)
         | select(.body | test($re))
       ] | sort_by(.submitted_at) | last
       | if . == null then empty

@@ -30,8 +30,6 @@ gh_ship() {
   local url
   url="$(gh "${args[@]}" | tail -n1)"
   [[ "$url" == *"/pull/"* ]] || die "gh pr create returned no PR URL (got: $url)"
-  # Pin the merge base so later bare `gh pr create` calls stack correctly.
-  git config "branch.$branch.gh-merge-base" "$parent"
   printf '%s\t%s\n' "${url##*/}" "$url"
 }
 

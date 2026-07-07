@@ -12,9 +12,8 @@ TypeScript/Bun CLI is archived at tag `v0-ts-cli`).
 - Claude plugin packaging: `.claude-plugin/plugin.json` + marketplace
   manifest; skills `/bmad-pr`, `/bmad-pr-loop`, `/bmad-pr-setup`.
 - Stacked PR shipping: story PRs open as drafts based on the previous
-  story's open PR — `gt` native, `gh` emulated (explicit `--base` +
-  merge-base pin), bare-git fallback; `retarget` repairs the stack after
-  the parent merges.
+  story's open PR — `gt` native, `gh` emulated (explicit `--base`/`--head`),
+  bare-git fallback; `retarget` repairs the stack after the parent merges.
 - CI + reviewer monitoring: `watch` polls check buckets and the reviewer
   lifecycle (check-run or bot-review completion), with timeout/absent
   verdicts.

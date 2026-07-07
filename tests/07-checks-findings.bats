@@ -51,6 +51,38 @@ EOF
   [ "$(echo null | checks_failing)" = "[]" ]
 }
 
+@test "checks_wait holds a pass verdict until the registration grace elapses" {
+  stub_init
+  make_stub gh <<'EOF'
+printf '[{"name":"first","bucket":"pass"}]\n'
+EOF
+  export BMAD_PR_POLL_INTERVAL=1 BMAD_PR_REGISTER_GRACE=2
+  local_start=$(date +%s)
+  run checks_wait 42 30
+  elapsed=$(($(date +%s) - local_start))
+  [ "$status" -eq 0 ]
+  [ "$output" = "pass" ]
+  [ "$elapsed" -ge 2 ]
+}
+
+@test "checks_wait returns fail immediately, even inside the grace window" {
+  stub_init
+  make_stub gh <<'EOF'
+printf '[{"name":"first","bucket":"fail"}]\n'
+EOF
+  export BMAD_PR_POLL_INTERVAL=1 BMAD_PR_REGISTER_GRACE=60
+  run checks_wait 42 90
+  [ "$status" -eq 0 ]
+  [ "$output" = "fail" ]
+}
+
+@test "vendor.sh normalizes a v-prefixed BATS_VERSION override" {
+  run env BATS_VERSION=v1.11.1 "$REPO_ROOT/tests/vendor.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bats-core-1.11.1/bin/bats"* ]]
+  [[ "$output" != *"vv"* ]]
+}
+
 @test "checks_wait reports error after repeated API failures (not a fake timeout)" {
   stub_init
   make_stub gh <<'EOF'

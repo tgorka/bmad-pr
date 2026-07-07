@@ -19,6 +19,7 @@ BMAD_PR_CONFIG_KEYS=(
   BMAD_PR_SCORE_THRESHOLD
   BMAD_PR_TIMEOUT           # seconds for watch
   BMAD_PR_POLL_INTERVAL     # initial poll interval, seconds
+  BMAD_PR_REGISTER_GRACE    # seconds to wait for check suites to register
   BMAD_PR_MAX_ITERATIONS    # review-cycle ceiling (used by the loop skill)
 )
 
@@ -33,6 +34,7 @@ config_defaults() {
   : "${BMAD_PR_SCORE_THRESHOLD:=8}"
   : "${BMAD_PR_TIMEOUT:=1800}"
   : "${BMAD_PR_POLL_INTERVAL:=15}"
+  : "${BMAD_PR_REGISTER_GRACE:=90}"
   : "${BMAD_PR_MAX_ITERATIONS:=5}"
 }
 
@@ -65,6 +67,11 @@ config_load() {
       refuse "BMAD_PR_LEDGER_DIR must be a repo-relative path without '..' segments (got: $BMAD_PR_LEDGER_DIR)"
       ;;
   esac
+
+  # Provider names are tokens, never paths — a value with separators would
+  # source arbitrary files instead of a reviewer profile.
+  [[ "$BMAD_PR_REVIEWER" =~ ^[a-z0-9_-]+$ ]] ||
+    refuse "invalid reviewer provider name: '$BMAD_PR_REVIEWER' (expected a token like cubic, generic, none)"
 
   local profile="${LIB_SOURCE_DIR}/reviewers/${BMAD_PR_REVIEWER}.sh"
   if [[ "$BMAD_PR_REVIEWER" != "none" ]]; then
