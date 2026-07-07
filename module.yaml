@@ -2,7 +2,7 @@
 # into a project's _bmad/config.yaml (same pattern as bmad-loop's module.yaml).
 code: bmad-pr
 name: BMAD PR
-module_version: 1.0.0
+module_version: 1.1.0
 default_selected: true
 module_greeting: >
   bmad-pr ships each story as a draft PR stacked on the previous story's PR,

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.1.0 — 2026-07-07
+
 ### Added
 
 - DW-1: PR body templates — `BMAD_PR_TEMPLATE` (default

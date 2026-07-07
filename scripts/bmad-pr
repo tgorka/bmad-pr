@@ -16,7 +16,7 @@ for _lib in config ledger preflight backend backend-gh backend-gt backend-git \
   source "$LIB_SOURCE_DIR/$_lib.sh"
 done
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 
 usage() {
   cat <<'EOF'
