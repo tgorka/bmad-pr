@@ -16,7 +16,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
 
       - name: Cache vendored bats
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tests/.vendor
           key: bats-core-1.11.1
